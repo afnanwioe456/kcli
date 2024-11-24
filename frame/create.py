@@ -48,42 +48,51 @@ class ReferenceFrameBase:
         rotation = self.orientation.T
         return rotation @ (position - translation)
 
-    def transform_velocity_to_father_frame(self, position, velocity):
-        position = np.array(position)
+    def transform_velocity_to_father_frame(self, position_inref, velocity):
+        position_inref = np.array(position_inref)
         velocity = np.array(velocity)
         relative_velocity = self.velocity - self.father.velocity
         rotation = self.orientation
-        coriolis_effect = np.cross(self.angular_velocity, position)
-        return rotation @ velocity + relative_velocity + coriolis_effect
+        coriolis_effect = np.cross(self.angular_velocity, position_inref)
+        print('effect:', coriolis_effect)
+        return rotation @ (velocity + coriolis_effect) + relative_velocity
 
-    def transform_velocity_from_father_frame(self, position, velocity):
-        position = np.array(position)
+    def transform_velocity_from_father_frame(self, position_inref, velocity):
+        position_inref = np.array(position_inref)
         velocity = np.array(velocity)
         relative_velocity = self.velocity - self.father.velocity
         rotation = self.orientation.T
-        coriolis_effect = np.cross(self.angular_velocity, position)
-        return rotation @ (velocity - relative_velocity - coriolis_effect)
+        coriolis_effect = np.cross(self.angular_velocity, position_inref)
+        return rotation @ (velocity - relative_velocity) - coriolis_effect
     
+    @staticmethod
+    def from_left_hand(vector):
+        vector = np.array(vector, dtype=np.float64)
+        if vector.ndim != 1 or vector.size != 3:
+            raise ValueError(f"Shape of the vector should be (,3), got {vector.shape}")
+        return np.array([vector[0], vector[2], vector[1]], dtype=np.float64)
+
 
 ECI = ReferenceFrameBase(None)
 
 
 class TNWFrame(ReferenceFrameBase):
+    """
+    切向-法向-径向参考系
+    """
     @staticmethod
     def from_orbit(orbit: Orbit):
-        """从轨道建立切向-法向-径向参考系, 即krpc中orbital_reference_frame的右手系
+        """
+        从轨道建立切向-法向-径向参考系
 
         Args:
             orbit (Orbit): 轨道
 
         Returns:
-            OrbitalFrame: 轨道参考系
+            TNWFrame: 轨道参考系
         """
-        position = orbit.poliorbit.r * 1000
-        velocity = orbit.poliorbit.v * 1000
-        # TODO: 单位问题, 考虑自定义接口私有化poliorbit
-        # TODO: 精度问题, 见测试, 考虑调用私有方法
-        # TODO: 左手系问题, 避免了么？
+        position = orbit.r
+        velocity = orbit.v
 
         T = velocity / np.linalg.norm(velocity)  # T方向：速度矢量单位化
         h = np.cross(position, velocity)  # 轨道角动量
@@ -94,7 +103,49 @@ class TNWFrame(ReferenceFrameBase):
         angular_velocity = h / np.linalg.norm(position) ** 2
         return TNWFrame(ECI, position, orientation, velocity, angular_velocity)
 
+    @staticmethod
+    def from_left_hand(vector):
+        vector = np.array(vector, dtype=np.float64)
+        if vector.ndim != 1 or vector.size != 3:
+            raise ValueError(f"Shape of the vector should be (,3), got {vector.shape}")
+        return np.array([vector[1], vector[0], vector[2]], dtype=np.float64)
         
+
+class OrbitalFrame(ReferenceFrameBase):
+    """
+    切向-法向-径向参考系, 但没有角速度, 即krpc orbital_reference_frame 和 ksp orbit_mode
+    """
+    @staticmethod
+    def from_orbit(orbit: Orbit):
+        """
+        从轨道建立切向-法向-径向参考系, 但没有角速度,
+        即krpc orbital_reference_frame 和 ksp orbit_mode
+
+        Args:
+            orbit (Orbit): 轨道
+
+        Returns:
+            OrbitalFrame: 轨道参考系
+        """
+        position = orbit.r
+        velocity = orbit.v
+
+        T = velocity / np.linalg.norm(velocity)
+        h = np.cross(position, velocity)
+        N = h / np.linalg.norm(h)
+        W = np.cross(N, T)
+
+        orientation = np.vstack((T, W, N)).T
+        return TNWFrame(ECI, position, orientation, velocity)
+
+    @staticmethod
+    def from_left_hand(vector):
+        vector = np.array(vector, dtype=np.float64)
+        if vector.ndim != 1 or vector.size != 3:
+            raise ValueError(f"Shape of the vector should be (,3), got {vector.shape}")
+        return np.array([vector[1], vector[0], vector[2]], dtype=np.float64)
+
+
 if __name__ == '__main__':
     from poliastro.twobody.orbit import Orbit as Poliorbit
     from poliastro.bodies import Earth
@@ -105,26 +156,25 @@ if __name__ == '__main__':
     conn = krpc.connect()
     vessel = conn.space_center.active_vessel
     target = conn.space_center.target_vessel
-    
-    v = vessel.velocity(vessel.orbit.body.non_rotating_reference_frame)
-    v = np.array([v[0], v[2], v[1]], dtype=np.float64)
-    r = vessel.position(vessel.orbit.body.non_rotating_reference_frame)
-    r = np.array([r[0], r[2], r[1]], dtype=np.float64)
-
-    tv_eci = target.velocity(vessel.orbit.body.non_rotating_reference_frame)
-    tv_eci = np.array([tv_eci[0], tv_eci[2], tv_eci[1]], dtype=np.float64)
-    tr_eci = target.position(vessel.orbit.body.non_rotating_reference_frame)
-    tr_eci = np.array([tr_eci[0], tr_eci[2], tr_eci[1]], dtype=np.float64)
-    tv_tnw = target.velocity(vessel.orbital_reference_frame)
-    tv_tnw = np.array([tv_tnw[1], tv_tnw[0], tv_tnw[2]], dtype=np.float64)
-    tr_tnw = target.position(vessel.orbital_reference_frame)
-    tr_tnw = np.array([tr_tnw[1], tr_tnw[0], tr_tnw[2]], dtype=np.float64)
-    print(tv_tnw, tr_tnw)
-
     orbit = Orbit.from_krpcv(vessel)
     tnw = TNWFrame.from_orbit(orbit)
-    print(type(tnw.velocity), tnw.velocity, v)
-    print(type(tnw.origin), tnw.origin, r)
-    resv_eci = tnw.transform_velocity_to_father_frame(tr_tnw, tv_tnw)
-    print(resv_eci)
-    print(tv_eci)
+    print(orbit.v, orbit.r)
+    
+    v = vessel.velocity(vessel.orbit.body.non_rotating_reference_frame)
+    v = ECI.from_left_hand(v)
+    r = vessel.position(vessel.orbit.body.non_rotating_reference_frame)
+    r = ECI.from_left_hand(r)
+
+    tv_eci = target.velocity(vessel.orbit.body.non_rotating_reference_frame)
+    tv_eci = ECI.from_left_hand(tv_eci)
+    tr_eci = target.position(vessel.orbit.body.non_rotating_reference_frame)
+    tr_eci = ECI.from_left_hand(tr_eci)
+    tv_tnw = target.velocity(vessel.orbital_reference_frame)
+    tv_tnw = TNWFrame.from_left_hand(tv_tnw)
+    tr_tnw = target.position(vessel.orbital_reference_frame)
+    tr_tnw = TNWFrame.from_left_hand(tr_tnw)
+
+    resr_eci = tnw.transform_position_to_father_frame(tr_tnw)
+    resv_eci = tnw.transform_velocity_to_father_frame(tr_tnw, np.array([0, 0, 0]))
+    print(resv_eci, tv_eci)
+    print(resr_eci, tr_eci)

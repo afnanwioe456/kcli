@@ -1,7 +1,7 @@
+from functools import cached_property
 import krpc
 from poliastro.twobody import Orbit as PoliOrbit
 from poliastro.bodies import Earth
-from poliastro.plotting import OrbitPlotter3D
 from astropy import time
 from astropy import units as u
 from krpc.services.spacecenter import Vessel
@@ -18,12 +18,52 @@ class Orbit:
                  poliorbit: PoliOrbit,
                  epoch_sec: float,
                  ):
-        self.poliorbit = poliorbit
+        self._poliorbit = poliorbit
         self.epoch_sec = epoch_sec
+
+    @cached_property
+    def r(self, unit=u.m):
+        r: u.quantity.Quantity = self._poliorbit.r
+        return r.to_value(unit)
+    
+    @cached_property
+    def v(self, unit=(u.m/u.s)):
+        v: u.quantity.Quantity = self._poliorbit.v
+        return v.to_value(unit)
+    
+    @cached_property
+    def a(self, unit=u.m):
+        a: u.quantity.Quantity = self._poliorbit.a
+        return a.to_value(unit)
+
+    @cached_property
+    def ecc(self, unit=u.one):
+        ecc: u.quantity.Quantity = self._poliorbit.ecc
+        return ecc.to_value(unit)
+
+    @cached_property
+    def inc(self, unit=u.rad):
+        inc: u.quantity.Quantity = self._poliorbit.inc
+        return inc.to_value(unit)
+
+    @cached_property
+    def rann(self, unit=u.rad):
+        raan: u.quantity.Quantity = self._poliorbit.raan
+        return raan.to_value(unit)
+
+    @cached_property
+    def argp(self, unit=u.rad):
+        argp: u.quantity.Quantity = self._poliorbit.argp
+        return argp.to_value(unit)
+
+    @cached_property
+    def nu(self, unit=u.rad):
+        nu: u.quantity.Quantity = self._poliorbit.nu
+        return nu.to_value(unit)
 
     @classmethod
     def from_coe(cls, attractor, a, ecc, inc, raan, argp, nu, epoch_sec):
-        """从ksp经典轨道元素创建Orbit对象
+        """从经典轨道元素和KSPRO历时创建Orbit对象
 
         Args:
             attractor str: 中心天体
