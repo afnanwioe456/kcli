@@ -1,11 +1,12 @@
 from functools import cached_property
-import krpc
+import numpy as np
 from poliastro.twobody import Orbit as PoliOrbit
 from poliastro.bodies import Earth
 from astropy import time
 from astropy import units as u
-from krpc.services.spacecenter import Vessel
+from krpc.services.spacecenter import Vessel, Orbit as KRPCOrbit
 
+from .utils import orbit_launch_window
 from ..utils import get_ut, sec_to_date
 
 
@@ -47,7 +48,7 @@ class Orbit:
         return inc.to_value(unit)
 
     @cached_property
-    def rann(self, unit=u.rad):
+    def raan(self, unit=u.rad):
         raan: u.quantity.Quantity = self._poliorbit.raan
         return raan.to_value(unit)
 
@@ -60,6 +61,17 @@ class Orbit:
     def nu(self, unit=u.rad):
         nu: u.quantity.Quantity = self._poliorbit.nu
         return nu.to_value(unit)
+
+    @cached_property
+    def period(self, unit=u.rad):
+        period: u.quantity.Quantity = self._poliorbit.period
+        return period.to_value(unit)
+
+    def propagate(self, t, unit=u.s):
+        quant = t * unit
+        epoch_sec = self.epoch_sec + quant.to_value(u.s)
+        orb = self._poliorbit.propagate(quant)
+        return Orbit(orb, epoch_sec)
 
     @classmethod
     def from_coe(cls, attractor, a, ecc, inc, raan, argp, nu, epoch_sec):
@@ -93,15 +105,50 @@ class Orbit:
             vessel (Vessel): krpc Vessel
         """
         orbit = vessel.orbit
+        ut = get_ut()
+        nu = orbit.true_anomaly
         return cls.from_coe(orbit.body.name,
                             orbit.semi_major_axis,
                             orbit.eccentricity,
                             orbit.inclination,
                             orbit.longitude_of_ascending_node,
                             orbit.argument_of_periapsis,
-                            orbit.true_anomaly,
-                            get_ut())
+                            nu,
+                            ut)
 
+
+    @classmethod
+    def from_krpcorb(cls, orbit: KRPCOrbit):
+        """从krpc Orbit对象创建Orbit对象
+
+        Args:
+            orbit (Orbit): krpc Orbit
+        """
+        ut = get_ut()
+        return cls.from_coe(orbit.body.name,
+                            orbit.semi_major_axis,
+                            orbit.eccentricity,
+                            orbit.inclination,
+                            orbit.longitude_of_ascending_node,
+                            orbit.argument_of_periapsis,
+                            orbit.true_anomaly_at_ut(ut),
+                            ut)
+
+    def launch_window(self, site_p, direction='SE', phase_diff=40, start_period=0, end_period=30):
+        """返回发射场向轨道发射的最佳ut
+
+        Args:
+            site_p (ndarray): 发射场位置矢量, 惯性系
+            direction (str): 发射方向SE/NE/[Default]. Defaults to 'SE'.
+            phase_diff (int, optional): 最小相位差. Defaults to 40.
+            start_period (int, optional): 开始周期. Defaults to 0.
+            end_period (int, optional): 结束周期. Defaults to 30.
+
+        Returns:
+            float: 发射窗口
+        """
+        ut: float = orbit_launch_window(self, np.array(site_p), direction, phase_diff, start_period, end_period)
+        return ut
 
     
         

@@ -1,10 +1,9 @@
 from __future__ import annotations
-
 from time import sleep
-
 import krpc
 from krpc.client import Client
 from krpc.services.spacecenter import Vessel
+
 from .tasks import Task
 from ..kerbals import Kerbal
 from ..utils import *
@@ -30,7 +29,7 @@ class Launch(Task):
                  inclination: float = 19.61,
                  start_time: int = -1,  # 执行时间，传递给任务管理器修正
                  duration: int = 3600,
-                 importance: int = 5,
+                 importance: int = 3,
                  autostage: bool = True,
                  ):
         super().__init__(name, tasks, start_time, duration, importance)
@@ -58,10 +57,10 @@ class Launch(Task):
     def description(self):
         return (
             f"{self.name}->发射\n"
-            f"\t运载火箭：{self.rocket_name} 载荷：{self.payload_name[1:]}\n"
-            f"\t近拱点：{self.pe_altitude / 1000}km 远拱点：{self.ap_altitude / 1000}km\n"
-            f"\t倾角：{self.inclination}\n"
-            f"\t预计点火时：{'ASAP' if self.start_time <= 0 else sec_to_date(self.start_time)}")
+            f"\t运载火箭: {self.rocket_name} 载荷: {self.payload_name[1:]}\n"
+            f"\t近拱点: {self.pe_altitude / 1000}km 远拱点: {self.ap_altitude / 1000}km\n"
+            f"\t倾角: {self.inclination}\n"
+            f"\t预计点火时: {'ASAP' if self.start_time <= 0 else sec_to_date(self.start_time)}")
 
     def _conn_setup(self, **kwargs):
         setup_flag = super()._conn_setup(f"launch: {self.name}")
@@ -98,44 +97,30 @@ class Launch(Task):
         self.autopilot.turn_roll = 90
         self.autopilot.autostage = self.autostage
         self.autopilot.enabled = True
-        LOGGER.debug(f'Autopilot engaged at "{self.name}" ... ')
+        LOGGER.debug(f'"{self.name}": autopilot engaged')
 
     def _roll_out(self):  # 推出火箭
         with krpc.connect(name=self.rocket_name + ' roll out') as conn:
             sc = conn.space_center
             if sc is None:
                 return
-            LOGGER.debug(f'"{self.name}" rolling out...')
-            sc.launch_vessel('VAB', 
-                             self.rocket_name + self.payload_name, 
-                             'LaunchPad',
-                             recover=True, 
-                            #  crew=Kerbal.get_crew_members(self.crew_name_list, self.conn),
-                             )
+            LOGGER.debug(f'"{self.name}": rolling out...')
+            sc.launch_vessel('VAB', self.rocket_name + self.payload_name, 'LaunchPad', True, [])
 
+    @logging_around
     def start(self):
         self._roll_out()
         self._conn_setup()
-        add_abort_callback(self)
         time_wrap(self.start_time)
-
         self._activate_next_stage()
         while not self.tasks.abort_flag and self.autopilot.enabled:
             sleep(10)
-        
-        if not self.tasks.abort_flag:
-            LOGGER.debug(f'Launch "{self.name}" completed')
-            self._submit_next_task()
-        else:
-            LOGGER.debug(f'Launch "{self.name}" aborted')
-
-        if self.conn is None:
-            return
+        self._submit_next_task()
         self.conn.close()
 
     def _submit_next_task(self):
-        from maneuver import SimpleMnv
-        from release_payload import ReleasePayload
+        from .maneuver import SimpleMnv
+        from .release_payload import ReleasePayload
         new_task = []
         p_release_1 = ReleasePayload(self.name, self.tasks)
         # p_release_2 = ReleasePayload(self.name, self.tasks)
@@ -166,8 +151,8 @@ class Ariane5ECALaunch(Launch):
         super().__init__(tasks, **kwargs)
 
     def _submit_next_task(self):
-        from maneuver import SimpleMnv
-        from release_payload import ReleasePayload
+        from .maneuver import SimpleMnv
+        from .release_payload import ReleasePayload
         new_task = []
         p_release_1 = ReleasePayload(self.name, self.tasks, count=2)
         p_release_2 = ReleasePayload(self.name, self.tasks)
@@ -200,7 +185,3 @@ LAUNCH_PAYLOAD_DIC = {
     'r': '_Relay',
     'sysc': '_Soyuz_spacecraft'
 }
-
-
-if __name__ == '__main__':
-    pass

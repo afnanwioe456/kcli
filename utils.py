@@ -9,14 +9,11 @@ import krpc.services
 
 from .repository import *
 
-if TYPE_CHECKING:
-    from task.tasks import Task
-
 LINE_SEP = '-----------------------------------------------------'
 KSP_EPOCH_TIME = -599616000
-
-DEBUG_FLAG = True
-
+LAUNCH_SITES = {
+    'wenchang': (19.613726150307052, 110.9553275138089)
+}
 
 ### LOGGER ###
 
@@ -46,6 +43,29 @@ def setup_logger():
 
 LOGGER = setup_logger()
 
+def logging_around(func):
+    def wrapper(*args, **kwargs):
+        log_flag = False
+        if len(args) > 0 and isinstance(args[0], object):
+            instance = args[0]
+            class_name = instance.__class__.__name__
+            func_name = func.__name__
+            attrs = dir(instance)
+            task_name = instance.name if 'name' in attrs else 'Instance'
+            task_descr = instance.short_description if 'short_description' in attrs else ''
+            LOGGER.debug(f'{task_name} entering {class_name}.{func_name}\n{task_descr}')
+            log_flag = True
+        try:
+            result = func(*args, **kwargs)
+        except Exception as e:
+            if log_flag:
+                LOGGER.exception(f'{task_name} raised an execption in {class_name}.{func_name}')
+            raise e
+        if log_flag:
+            LOGGER.debug(f'{task_name} exiting {class_name}.{func_name}')
+        return result
+    return wrapper
+            
 ### GLOBAL CONNECTION ###
 
 UTIL_CONN = krpc.connect('krpclive', address='127.0.0.1', rpc_port=65534, stream_port=65535)
@@ -98,6 +118,15 @@ def sec_to_date(seconds: int) -> datetime:
     time_difference = timedelta(seconds=seconds)
     result_datetime = epoch + time_difference
     return result_datetime
+
+### LAUNCH_SITE ###
+
+def get_launch_site_position(site: str = 'wenchang'):
+    la, lo = LAUNCH_SITES[site]
+    body = UTIL_CONN.space_center.bodies['Earth']
+    site_p = body.surface_position(la, lo, body.non_rotating_reference_frame)
+    site_p = (site_p[0], site_p[2], site_p[1])
+    return site_p
 
 ### VESSEL.NAME ###
 
@@ -190,7 +219,7 @@ def abort_checker(func):
     return wrapper
 
 
-def add_abort_callback(task: Task):
+def add_abort_callback(task):
     def abort_callback(value):
         if value:
             task.tasks.abort_flag = True

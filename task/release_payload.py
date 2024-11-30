@@ -1,12 +1,12 @@
 from __future__ import annotations
-
 from time import sleep
+from krpc.services.spacecenter import Vessel
 
-from task.tasks import Task
-from utils import *
+from .tasks import Task
+from ..utils import *
 
 if TYPE_CHECKING:
-    from task.tasks import Tasks
+    from .tasks import Tasks
 
 
 class ReleasePayload(Task):
@@ -50,6 +50,7 @@ class ReleasePayload(Task):
         if solar_panel:
             deploy_solar_panels(vessel)
 
+    @logging_around
     def start(self):
         setup_flag = self._conn_setup()
         if not setup_flag or self.conn is None or self.sc is None or self.vessel is None:
@@ -60,7 +61,7 @@ class ReleasePayload(Task):
         self.vessel.name = vessel_namer(f'{self.name}_tmp')
         # 分级，释放第一个载荷会自动切换到载荷上
         self._activate_next_stage()
-        print(f'释放载荷：{self.vessel.name}')
+        LOGGER.debug(f'释放载荷：{self.vessel.name}')
         self.count -= 1
         adapter_name = self.vessel.name
         # 将active_vessel切换到释放的载具上并命名
@@ -87,13 +88,12 @@ class ReleasePayload(Task):
             for p in new_payloads:
                 p.name = vessel_namer(self.original_name)
                 self._deploy(p, 3)
-                print(f'释放载荷：{p.name}')
+                LOGGER.debug(f'释放载荷：{p.name}')
             sleep(5)
             self.count -= 1
 
         self.vessel.type = self.sc.VesselType.debris # type: ignore
         self.vessel.name += ' Debris'
-        print('payload release complete.')
         self.conn.close()
 
 
@@ -109,14 +109,3 @@ def deploy_antenna(vessel: Vessel):
     for a in antennas:
         if a.deployable:
             a.deployed = True
-
-
-if __name__ == '__main__':
-    from task.tasks import TaskQueue
-    TASK_QUEUE = TaskQueue()
-    from threading import Event
-    NEW_TASK_EVENT = Event()
-    NEW_TASK_EVENT.set()
-    t = ''
-    release = ReleasePayload("Ariane_5_ECA_Relay", t, 2) # type: ignore
-    release.start()

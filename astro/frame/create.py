@@ -1,5 +1,6 @@
 from __future__ import annotations
 import numpy as np
+from astropy import units as u
 
 from ..orbit.create import Orbit
 
@@ -54,7 +55,6 @@ class ReferenceFrameBase:
         relative_velocity = self.velocity - self.father.velocity
         rotation = self.orientation
         coriolis_effect = np.cross(self.angular_velocity, position_inref)
-        print('effect:', coriolis_effect)
         return rotation @ (velocity + coriolis_effect) + relative_velocity
 
     def transform_velocity_from_father_frame(self, position_inref, velocity):
@@ -146,35 +146,50 @@ class OrbitalFrame(ReferenceFrameBase):
         return np.array([vector[1], vector[0], vector[2]], dtype=np.float64)
 
 
-if __name__ == '__main__':
-    from poliastro.twobody.orbit import Orbit as Poliorbit
-    from poliastro.bodies import Earth
-    from poliastro.plotting import OrbitPlotter3D
-    from astropy import units as u
-    import krpc
-    
-    conn = krpc.connect()
-    vessel = conn.space_center.active_vessel
-    target = conn.space_center.target_vessel
-    orbit = Orbit.from_krpcv(vessel)
-    tnw = TNWFrame.from_orbit(orbit)
-    print(orbit.v, orbit.r)
-    
-    v = vessel.velocity(vessel.orbit.body.non_rotating_reference_frame)
-    v = ECI.from_left_hand(v)
-    r = vessel.position(vessel.orbit.body.non_rotating_reference_frame)
-    r = ECI.from_left_hand(r)
+class LocalAttitudeFrame(ReferenceFrameBase):
+    """
+    切向-法向-径向姿态参考系, 固定在轨道上
+    """
+    @staticmethod
+    def from_orbit(orbit: Orbit):
+        position = orbit.r
+        velocity = orbit.v
 
-    tv_eci = target.velocity(vessel.orbit.body.non_rotating_reference_frame)
-    tv_eci = ECI.from_left_hand(tv_eci)
-    tr_eci = target.position(vessel.orbit.body.non_rotating_reference_frame)
-    tr_eci = ECI.from_left_hand(tr_eci)
-    tv_tnw = target.velocity(vessel.orbital_reference_frame)
-    tv_tnw = TNWFrame.from_left_hand(tv_tnw)
-    tr_tnw = target.position(vessel.orbital_reference_frame)
-    tr_tnw = TNWFrame.from_left_hand(tr_tnw)
+        T = velocity / np.linalg.norm(velocity)
+        h = np.cross(position, velocity)
+        N = h / np.linalg.norm(h)
+        W = np.cross(N, T)
 
-    resr_eci = tnw.transform_position_to_father_frame(tr_tnw)
-    resv_eci = tnw.transform_velocity_to_father_frame(tr_tnw, np.array([0, 0, 0]))
-    print(resv_eci, tv_eci)
-    print(resr_eci, tr_eci)
+        orientation = np.vstack((T, W, N)).T
+        return TNWFrame(ECI, position, orientation)
+
+    @staticmethod
+    def from_left_hand(vector):
+        vector = np.array(vector, dtype=np.float64)
+        if vector.ndim != 1 or vector.size != 3:
+            raise ValueError(f"Shape of the vector should be (,3), got {vector.shape}")
+        return np.array([vector[1], vector[0], vector[2]], dtype=np.float64)
+
+
+class PQWFrame(ReferenceFrameBase):
+    """
+    PWQ参考系, 原点位于引力中心, p轴指向近地点, q轴指向真近点90°角, w轴指向角动量方向
+    """
+    @staticmethod
+    def from_orbit(orbit: Orbit):
+        r = orbit.r
+        r_norm = np.linalg.norm(r)
+        v = orbit.v
+        
+        h = np.cross(r, v)
+        h_norm = np.linalg.norm(h)
+        W = h / h_norm
+        GM = orbit._poliorbit.attractor.k.to_value(u.m ** 3 / u.s ** 2)
+        e = np.cross(v, h) / GM - r / r_norm
+        e_norm = np.linalg.norm(e)
+        P = e / e_norm
+        Q = np.cross(W, P)
+
+        orientation = np.vstack((P, Q, W)).T
+        return PQWFrame(ECI, orientation=orientation)
+

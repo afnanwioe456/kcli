@@ -1,17 +1,30 @@
 from __future__ import annotations
-import heapq
+import krpc
 import threading
 from typing import TYPE_CHECKING
 
 from krpc.client import Client
 from krpc.services.spacecenter import Vessel
 from krpc.event import Event as krpcEvent
-from ..utils import LOGGER, UTIL_CONN
+from ..utils import LOGGER, UTIL_CONN, logging_around
 
 if TYPE_CHECKING:
     from command import ChatMsg
 
 MAX_IMPORTANCE = 9
+"""
+IMPORTANCE:
+0: 弹幕普通发射任务 
+1: 弹幕高优先级发射任务
+2: 弹幕紧急发射任务
+3: 对接
+4: 
+5: 默认优先级
+6:
+7: 默认轨道机动
+8: 交会机动
+9: 捕获机动
+"""
 
 
 class Task:
@@ -24,14 +37,12 @@ class Task:
                  start_time: int,
                  duration: int,
                  importance: int = 3,
-                 step: int | None = None,  # 推迟任务的周期，通常是轨道周期
                  ):
         self.name = name
         self.tasks = tasks
         self.importance = importance
         self.start_time = start_time
         self.duration = duration
-        self.step = step
 
         self.event_list = []
         self.time_out = 1800
@@ -44,11 +55,15 @@ class Task:
     def short_description(self) -> str:
         return self.description.split('\n')[0]
 
+    def reschedule(self, after_t) -> Task:
+        self.start_time = after_t
+        return self
+
     def __str__(self):
         return self.description
 
     def _conn_setup(self, conn_name: str):
-        self.conn = UTIL_CONN
+        self.conn = krpc.connect(conn_name)
         self.sc = self.conn.space_center
         if self.sc is None:
             return False
@@ -107,6 +122,7 @@ class Task:
             [event.remove() for event in self.event_list]
             self.event_list.clear()
 
+    @logging_around
     def start(self):
         self._conn_setup('undefined')
 
@@ -129,15 +145,7 @@ class Tasks:
         self.id = id  # 对应的指令编号
         self.task_queue = task_queue
         self.abort_flag = False  # 某一个任务异常终止则放弃整个
-        self.importance = 0
     
-    def _update_importance(self):
-        max_im = 0
-        for t in self.task_list:
-            if t.importance > max_im:
-                max_im = t.importance
-        self.importance = max_im
-
     @property
     def next_task(self) -> Task | None:
         return self.task_list[0] if self.task_list else None
@@ -146,7 +154,6 @@ class Tasks:
         if not isinstance(task, list):
             task = [task]
         self.task_list += task
-        self._update_importance()
 
         log = (f"Tasks [{self.id}] {self.msg.user_name} added {len(task)} new Task(s):\n"
                f"{task[0].short_description}")
@@ -156,7 +163,6 @@ class Tasks:
         if not isinstance(task, list):
             task = [task]
         self.task_list = task + self.task_list
-        self._update_importance()
 
         log = (f"Tasks [{self.id}] {self.msg.user_name} added {len(task)} new Task(s):\n"
                f"{task[0].short_description}")
@@ -166,7 +172,6 @@ class Tasks:
         if not self.next_task:
             return
         self.current_task = self.task_list.pop(0)
-        self._update_importance()
         self.task_queue.write()
         log = (f"Tasks [{self.id}] launching a new Task:\n"
                f"{self.current_task.description}")
@@ -174,32 +179,26 @@ class Tasks:
 
         self.current_task.start()
 
+        log = (f"Tasks [{self.id}] finished @ {threading.current_thread().name}\n")
+        LOGGER.debug(log)
         ret: Tasks | None = None
         if self.abort_flag:
-            log = (f"Tasks [{self.id}] finished @ {threading.current_thread().name}\n")
-            LOGGER.debug(log)
-            log = (f"\t任务中止:\n{self.msg.chat_text} @ {self.msg.user_name}\n"
+            log = (f"任务中止:\n{self.msg.chat_text} @ {self.msg.user_name}\n"
                    f"\t{self.current_task.description}")
             LOGGER.info(log)
         elif self.next_task is not None:
-            log = (f"Tasks [{self.id}] finished @ {threading.current_thread().name}\n")
-            LOGGER.debug(log)
-            log = (f"\t下一项任务:\n{self.msg.chat_text} @ {self.msg.user_name}\n"
+            log = (f"下一项任务:\n{self.msg.chat_text} @ {self.msg.user_name}\n"
                    f"\t{self.next_task.description}")
             LOGGER.info(log)
             ret = self
         else:
-            log = (f"Tasks [{self.id}] finished @ {threading.current_thread().name}\n")
-            LOGGER.debug(log)
-            log = (f"\t指令已完成:\n{self.msg.chat_text} @ {self.msg.user_name}")
+            log = (f"指令已完成:\n{self.msg.chat_text} @ {self.msg.user_name}")
             LOGGER.info(log)
 
         return ret
 
     def reschedule(self, after_t):
-        if self.next_task is None:
-            return
-        self.next_task.start_time = after_t
+        self.next_task = self.next_task.reschedule(after_t)
         log = f'Tasks [{self.id}] has been rescheduled to {self.next_task.start_time}'
         LOGGER.debug(log)
 
@@ -251,6 +250,9 @@ class TaskQueue:
             return self._size == 0
 
     def put(self, tasks: Tasks):
+        ut = get_ut()
+        if tasks.next_task.start_time < ut:
+            tasks.next_task.start_time = ut + 60
         with self._queue_condition:
             self._put_helper(tasks)
             self._size += 1
@@ -265,7 +267,7 @@ class TaskQueue:
             return
         newt_st = tasks.next_task.start_time
         newt_et = newt_st + tasks.next_task.duration
-        newt_im = tasks.importance
+        newt_im = tasks.next_task.importance
         conflict_nodes: list[TaskNode] = []
         max_conflict_im = 0
 
@@ -282,8 +284,8 @@ class TaskQueue:
             if cur_node.tasks.next_task.start_time >= newt_et:
                 break
             conflict_nodes.append(cur_node)
-            if cur_node.tasks.importance > max_conflict_im:
-                max_conflict_im = cur_node.tasks.importance
+            if cur_node.tasks.next_task.importance > max_conflict_im:
+                max_conflict_im = cur_node.tasks.next_task.importance
             cur_node = cur_node.next
         
         if len(conflict_nodes) == 0:

@@ -3,11 +3,11 @@ from __future__ import annotations
 import argparse
 import random
 
-from task.launch import *
-from task.tasks import Tasks
-from spacecrafts import *
-from utils import *
-from natural_command_process import natural_command
+from .task.launch import *
+from .task.tasks import Tasks
+from .spacecrafts import *
+from .utils import *
+from .natural_command_process import natural_command
 
 if TYPE_CHECKING:
     from task.tasks import TaskQueue, Task
