@@ -17,11 +17,11 @@ def orbit_launch_window(orbit: Orbit, site_position: np.ndarray, direction='SE',
     """
     发射到target轨道面的发射窗口
     """
-    period = orbit._poliorbit.attractor.rotational_period.to_value(u.s)
+    period = orbit.attractor.rotational_period.to_value(u.s)
     # 获得目标轨道面的法向量
-    target_position = orbit.r
-    target_velocity = orbit.v
-    target_raan = orbit.raan
+    target_position = orbit.r_vec.to_value(u.km)
+    target_velocity = orbit.v_vec.to_value(u.km / u.s)
+    target_raan = orbit.raan.to_value(u.rad)
     orbit_plane_normal = np.cross(target_position, target_velocity)
     # TODO: 轨道倾角小于发射场纬度时
     # 计算重合时的位置向量(x1, y1, z) (x2, y2, z)
@@ -57,7 +57,7 @@ def orbit_launch_window(orbit: Orbit, site_position: np.ndarray, direction='SE',
         launch_window = result_launch_window[i] + start_period * period
         launch_window_position = np.array([float(result_value[i][0]), float(result_value[i][1]), z])
         for _ in range(start_period, end_period):
-            target_position = orbit.propagate(launch_window).r
+            target_position = orbit.propagate(launch_window).r_vec.to_value(u.km)
             phase_angle = np.degrees(angle_between_vectors(launch_window_position, target_position))
             direction = np.cross(target_position, target_position - launch_window_position) / orbit_plane_normal > 0
             if not direction.all():
@@ -67,4 +67,4 @@ def orbit_launch_window(orbit: Orbit, site_position: np.ndarray, direction='SE',
                 best_launch_window = launch_window
             launch_window += period
 
-    return best_launch_window + orbit.epoch_sec
+    return best_launch_window + orbit.epoch

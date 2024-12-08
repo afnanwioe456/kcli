@@ -2,68 +2,70 @@ from __future__ import annotations
 import numpy as np
 from astropy import units as u
 
+from ..core.rotation import *
 from ..orbit.create import Orbit
 
 
 class ReferenceFrameBase:
     def __init__(self,
-                 father: ReferenceFrameBase,
-                 origin=np.zeros(3), 
-                 orientation=np.eye(3), 
-                 velocity=np.zeros(3), 
-                 angular_velocity=np.zeros(3),
+                 parent: ReferenceFrameBase,
+                 origin=np.zeros(3) * u.km, 
+                 rotation=np.eye(3), 
+                 velocity=np.zeros(3) * u.km / u.s, 
+                 angular_velocity=np.zeros(3) / u.s,
                  ):
         """构建参考系
 
         Args:
-            father (ReferenceFrame): 父参考系
-            origin (NDArray[float64], optional): 相对于父参考系的原点位置向量. Defaults to np.zeros(3).
-            orientation (NDArray[float64], optional): 向父参考系转换的方向余弦矩阵. Defaults to np.eye(3).
-            velocity (NDArray[float64], optional): 参考系平移速度向量. Defaults to np.zeros(3).
-            angular_velocity (NDArray[float64], optional): 参考系的角速度. Defaults to np.zeros(3).
+            parent (ReferenceFrame): 父参考系
+            origin (ndarray[Quantity], optional): 相对于父参考系的原点位置向量. Defaults to np.zeros(3).
+            rotation (ndarray[Quantity], optional): 向父参考系转换的方向余弦矩阵. Defaults to np.eye(3).
+            velocity (ndarray[Quantity], optional): 参考系平移速度向量. Defaults to np.zeros(3).
+            angular_velocity (ndarray[Quantity], optional): 参考系的角速度. Defaults to np.zeros(3).
         """
-        self.father = father
-        self.origin = np.array(origin)
-        self.orientation = np.array(orientation)
-        self.velocity = np.array(velocity)
-        self.angular_velocity = np.array(angular_velocity)
+        self.parent = parent
+        self.origin = origin
+        self.rotation = rotation
+        self.velocity = velocity
+        self.angular_velocity = angular_velocity
+
+    def transform_d_to_parent(self, direction):
+        """将方向矢量转移到父参考系"""
+        return self.rotation.T @ direction
+
+    def transform_d_from_parent(self, direction):
+        """将方向矢量从父参考系转移到此参考系"""
+        return self.rotation @ direction
         
-    def transform_position_to_father_frame(self, position):
-        """将位置矢量转移到父参考系
-
-        Args:
-            target_frame (ReferenceFrame): 目标参考系
-            position (NDArray[float64]): 位置矢量
-
-        Returns:
-            NDArray: 目标参考系中的位置矢量
-        """
-        position = np.array(position)
-        translation = self.origin - self.father.origin
-        rotation = self.orientation
+    @u.quantity_input(position=u.km)
+    def transform_p_to_parent(self, position):
+        """将位置矢量转移到父参考系"""
+        translation = self.origin - self.parent.origin
+        rotation = self.rotation.T
         return rotation @ position + translation
 
-    def transform_position_from_father_frame(self, position):
-        position = np.array(position)
-        translation = self.origin - self.father.origin
-        rotation = self.orientation.T
+    @u.quantity_input(position=u.km)
+    def transform_p_from_parent(self, position):
+        """将位置矢量从父参考系转移到此参考系"""
+        translation = self.origin - self.parent.origin
+        rotation = self.rotation
         return rotation @ (position - translation)
 
-    def transform_velocity_to_father_frame(self, position_inref, velocity):
-        position_inref = np.array(position_inref)
-        velocity = np.array(velocity)
-        relative_velocity = self.velocity - self.father.velocity
-        rotation = self.orientation
-        coriolis_effect = np.cross(self.angular_velocity, position_inref)
-        return rotation @ (velocity + coriolis_effect) + relative_velocity
+    @u.quantity_input(position_inref=u.km, velocity=u.km/u.s)
+    def transform_v_to_parent(self, rel_position, velocity):
+        """将速度矢量转移到父参考系"""
+        relative_velocity = self.velocity - self.parent.velocity
+        rotation = self.rotation.T
+        coriolis_effect = np.cross(self.angular_velocity, rel_position)
+        return rotation @ velocity + coriolis_effect + relative_velocity
 
-    def transform_velocity_from_father_frame(self, position_inref, velocity):
-        position_inref = np.array(position_inref)
-        velocity = np.array(velocity)
-        relative_velocity = self.velocity - self.father.velocity
-        rotation = self.orientation.T
-        coriolis_effect = np.cross(self.angular_velocity, position_inref)
-        return rotation @ (velocity - relative_velocity) - coriolis_effect
+    @u.quantity_input(position_inref=u.km, velocity=u.km/u.s)
+    def transform_v_from_parent(self, rel_position, velocity):
+        """将速度矢量从父参考系转移到此参考系"""
+        relative_velocity = self.velocity - self.parent.velocity
+        rotation = self.rotation
+        coriolis_effect = np.cross(self.angular_velocity, rel_position)
+        return rotation @ (velocity - relative_velocity - coriolis_effect)
     
     @staticmethod
     def from_left_hand(vector):
@@ -78,12 +80,12 @@ ECI = ReferenceFrameBase(None)
 
 class TNWFrame(ReferenceFrameBase):
     """
-    切向-法向-径向参考系
+    切向-径向-法向参考系
     """
     @staticmethod
     def from_orbit(orbit: Orbit):
         """
-        从轨道建立切向-法向-径向参考系
+        从轨道建立切向-径向-法向参考系
 
         Args:
             orbit (Orbit): 轨道
@@ -91,17 +93,18 @@ class TNWFrame(ReferenceFrameBase):
         Returns:
             TNWFrame: 轨道参考系
         """
-        position = orbit.r
-        velocity = orbit.v
-
-        T = velocity / np.linalg.norm(velocity)  # T方向：速度矢量单位化
-        h = np.cross(position, velocity)  # 轨道角动量
-        N = h / np.linalg.norm(h)  # N方向：角动量单位化
-        W = np.cross(N, T)  # W方向：完成右手系
-
-        orientation = np.vstack((T, W, N)).T
+        position = orbit.r_vec.to_value(u.km)
+        velocity = orbit.v_vec.to_value(u.km / u.s)
+        h = np.cross(position, velocity)
+        rotation = TNW_rotation(position, velocity)
         angular_velocity = h / np.linalg.norm(position) ** 2
-        return TNWFrame(ECI, position, orientation, velocity, angular_velocity)
+        return TNWFrame(
+            ECI, 
+            position * u.km, 
+            rotation, 
+            velocity * u.km / u.s, 
+            angular_velocity / u.s
+        )
 
     @staticmethod
     def from_left_hand(vector):
@@ -113,12 +116,12 @@ class TNWFrame(ReferenceFrameBase):
 
 class OrbitalFrame(ReferenceFrameBase):
     """
-    切向-法向-径向参考系, 但没有角速度, 即krpc orbital_reference_frame 和 ksp orbit_mode
+    切向-径向-法向参考系, 但没有角速度, 即krpc orbital_reference_frame 和 ksp orbit_mode
     """
     @staticmethod
     def from_orbit(orbit: Orbit):
         """
-        从轨道建立切向-法向-径向参考系, 但没有角速度,
+        从轨道建立切向-径向-法向参考系, 但没有角速度,
         即krpc orbital_reference_frame 和 ksp orbit_mode
 
         Args:
@@ -127,16 +130,15 @@ class OrbitalFrame(ReferenceFrameBase):
         Returns:
             OrbitalFrame: 轨道参考系
         """
-        position = orbit.r
-        velocity = orbit.v
-
-        T = velocity / np.linalg.norm(velocity)
-        h = np.cross(position, velocity)
-        N = h / np.linalg.norm(h)
-        W = np.cross(N, T)
-
-        orientation = np.vstack((T, W, N)).T
-        return TNWFrame(ECI, position, orientation, velocity)
+        position = orbit.r_vec.to_value(u.km)
+        velocity = orbit.v_vec.to_value(u.km / u.s)
+        rotation = TNW_rotation(position, velocity)
+        return OrbitalFrame(
+            ECI, 
+            position * u.km, 
+            rotation, 
+            velocity * u.km / u.s
+        )
 
     @staticmethod
     def from_left_hand(vector):
@@ -148,20 +150,18 @@ class OrbitalFrame(ReferenceFrameBase):
 
 class LocalAttitudeFrame(ReferenceFrameBase):
     """
-    切向-法向-径向姿态参考系, 固定在轨道上
+    切向-径向-法向姿态参考系, 固定在轨道上
     """
     @staticmethod
     def from_orbit(orbit: Orbit):
-        position = orbit.r
-        velocity = orbit.v
-
-        T = velocity / np.linalg.norm(velocity)
-        h = np.cross(position, velocity)
-        N = h / np.linalg.norm(h)
-        W = np.cross(N, T)
-
-        orientation = np.vstack((T, W, N)).T
-        return TNWFrame(ECI, position, orientation)
+        position = orbit.r_vec.to_value(u.km)
+        velocity = orbit.v_vec.to_value(u.km / u.s)
+        rotation = TNW_rotation(position, velocity)
+        return LocalAttitudeFrame(
+            ECI, 
+            position * u.km, 
+            rotation
+        )
 
     @staticmethod
     def from_left_hand(vector):
@@ -173,23 +173,18 @@ class LocalAttitudeFrame(ReferenceFrameBase):
 
 class PQWFrame(ReferenceFrameBase):
     """
-    PWQ参考系, 原点位于引力中心, p轴指向近地点, q轴指向真近点90°角, w轴指向角动量方向
+    近焦点参考系, 原点位于引力中心, p轴指向近地点, q轴指向真近点90°角, w轴指向角动量方向
     """
     @staticmethod
     def from_orbit(orbit: Orbit):
-        r = orbit.r
-        r_norm = np.linalg.norm(r)
-        v = orbit.v
-        
-        h = np.cross(r, v)
-        h_norm = np.linalg.norm(h)
-        W = h / h_norm
-        GM = orbit._poliorbit.attractor.k.to_value(u.m ** 3 / u.s ** 2)
-        e = np.cross(v, h) / GM - r / r_norm
-        e_norm = np.linalg.norm(e)
-        P = e / e_norm
-        Q = np.cross(W, P)
+        r = orbit.r_vec.to_value(u.km)
+        v = orbit.v_vec.to_value(u.km / u.s)
+        GM = orbit.attractor.k.to_value(u.km ** 3 / u.s ** 2)
+        rotation = PQW_rotation_rv(r, v, GM)
+        return PQWFrame(ECI, rotation=rotation)
 
-        orientation = np.vstack((P, Q, W)).T
-        return PQWFrame(ECI, orientation=orientation)
+    @staticmethod
+    def from_vectors(p, q, w):
+        rotation = np.vstack([p, q, w])
+        return PQWFrame(ECI, rotation=rotation)
 

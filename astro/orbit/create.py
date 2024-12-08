@@ -1,101 +1,143 @@
-from functools import cached_property
+from __future__ import annotations
+from typing import TYPE_CHECKING
 import numpy as np
-from poliastro.twobody import Orbit as PoliOrbit
-from poliastro.bodies import Earth
-from astropy import time
 from astropy import units as u
-from krpc.services.spacecenter import Vessel, Orbit as KRPCOrbit
 
+from .scalar import OrbitBase
 from .utils import orbit_launch_window
-from ..utils import get_ut, sec_to_date
+from ..core.kepler import *
+from ..core.lagrange import rv2rv_delta_t
+from ..body import *
+from ..utils import get_ut
+
+if TYPE_CHECKING:
+    from krpc.services.spacecenter import Vessel, Orbit as KRPCOrbit
 
 
 ATTRACTOR_DIC = {
-    'Earth': Earth,
+    'Earth': KSP_Earth,
+    'Moon': KSP_Moon,
 }
 
-class Orbit:
-    def __init__(self,
-                 poliorbit: PoliOrbit,
-                 epoch_sec: float,
-                 ):
-        self._poliorbit = poliorbit
-        self.epoch_sec = epoch_sec
-
-    @cached_property
-    def r(self, unit=u.m):
-        r: u.quantity.Quantity = self._poliorbit.r
-        return r.to_value(unit)
-    
-    @cached_property
-    def v(self, unit=(u.m/u.s)):
-        v: u.quantity.Quantity = self._poliorbit.v
-        return v.to_value(unit)
-    
-    @cached_property
-    def a(self, unit=u.m):
-        a: u.quantity.Quantity = self._poliorbit.a
-        return a.to_value(unit)
-
-    @cached_property
-    def ecc(self, unit=u.one):
-        ecc: u.quantity.Quantity = self._poliorbit.ecc
-        return ecc.to_value(unit)
-
-    @cached_property
-    def inc(self, unit=u.rad):
-        inc: u.quantity.Quantity = self._poliorbit.inc
-        return inc.to_value(unit)
-
-    @cached_property
-    def raan(self, unit=u.rad):
-        raan: u.quantity.Quantity = self._poliorbit.raan
-        return raan.to_value(unit)
-
-    @cached_property
-    def argp(self, unit=u.rad):
-        argp: u.quantity.Quantity = self._poliorbit.argp
-        return argp.to_value(unit)
-
-    @cached_property
-    def nu(self, unit=u.rad):
-        nu: u.quantity.Quantity = self._poliorbit.nu
-        return nu.to_value(unit)
-
-    @cached_property
-    def period(self, unit=u.rad):
-        period: u.quantity.Quantity = self._poliorbit.period
-        return period.to_value(unit)
-
-    def propagate(self, t, unit=u.s):
-        quant = t * unit
-        epoch_sec = self.epoch_sec + quant.to_value(u.s)
-        orb = self._poliorbit.propagate(quant)
-        return Orbit(orb, epoch_sec)
-
-    @classmethod
-    def from_coe(cls, attractor, a, ecc, inc, raan, argp, nu, epoch_sec):
-        """从经典轨道元素和KSPRO历时创建Orbit对象
+class Orbit(OrbitBase):
+    @u.quantity_input(t=u.s)
+    def propagate(self, t, tol=1e-8, max_iter=100):
+        """传播时间t后的轨道
 
         Args:
-            attractor str: 中心天体
-            a float: 半长轴
-            ecc float: 离心率
-            inc float: 轨道倾角
-            raan float: 升交点经度
-            argp float: 近地点辐角
-            nu float: 真近点角
-            epoch_sec int: KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数
+            t (Quantity): 传播时间.
+            tol (float, optional): 误差. Defaults to 1e-8.
+            max_iter (int, optional): 最大迭代数. Defaults to 100.
+
+        Returns:
+            Orbit: 传播后的轨道
         """
-        o = PoliOrbit.from_classical(ATTRACTOR_DIC[attractor],
-                                     a * u.m,
-                                     ecc * u.one,
-                                     inc * u.rad,
-                                     raan * u.rad,
-                                     argp * u.rad,
-                                     nu * u.rad,
-                                     time.Time(sec_to_date(epoch_sec)))
-        return cls(o, epoch_sec)
+        dt = t.to_value(u.s)
+        r_vec = self.r_vec.to_value(u.km)
+        v_vec = self.v_vec.to_value(u.km / u.s)
+        k = self.k.to_value(u.km ** 3 / u.s ** 2)
+        r1_vec, v1_vec = rv2rv_delta_t(r_vec, v_vec, dt, k, tol, max_iter)
+        return self.from_rv(
+            self.attractor,
+            r1_vec * u.km,
+            v1_vec * u.km / u.s,
+            self.epoch + t
+        )
+
+    @u.quantity_input(epoch=u.s)
+    def propagate_to_epoch(self, epoch, tol=1e-8, max_iter=100):
+        """传播到指定时间的轨道
+
+        Args:
+            epoch (Quantity): 时刻.
+            tol (float, optional): 误差. Defaults to 1e-8.
+            max_iter (int, optional): 最大迭代数. Defaults to 100.
+
+        Returns:
+            Orbit: 传播后的轨道
+        """
+        dt = epoch - self.epoch
+        return self.propagate(dt, tol, max_iter)
+
+    @u.quantity_input(nu=u.rad)
+    def propagate_to_nu(self, nu):
+        """传播到指定真近点角的轨道
+
+        Args:
+            nu (Quantity): 真近点角
+            tol (float, optional): 误差. Defaults to 1e-8.
+            max_iter (int, optional): 最大迭代数. Defaults to 100.
+
+        Returns:
+            Orbit: 传播后的轨道
+        """
+        orb = Orbit.from_coe(self.attractor, self.a, self.e, self.inc, 
+                             self.raan, self.argp, nu, self.epoch)
+        orb._epoch += orb.delta_t - self.delta_t
+        return orb
+
+    @u.quantity_input(r=u.km)
+    def propagate_to_r(self, r, sign=True):
+        nu = r2nu(
+            r.to_value(u.km),
+            self.h.to_value(u.km ** 2 / u.s),
+            self.e.to_value(u.one),
+            self.k.to_value(u.km ** 3 / u.s ** 2),
+            sign
+        ) * u.rad
+        return self.propagate_to_nu(nu)
+
+    @staticmethod
+    @u.quantity_input(
+        a=u.km,
+        ecc=u.one,
+        inc=u.rad,
+        raan=u.rad,
+        argp=u.rad,
+        nu=u.rad,
+        epoch=u.s,
+    )
+    def from_coe(attractor, a, e, inc, raan, argp, nu, epoch):
+        """从轨道根数创建Orbit对象
+
+        Args:
+            attractor (Body): 中心天体.
+            a (Quantity): 半长轴.
+            e (Quantity): 离心率.
+            inc (Quantity): 轨道倾角.
+            raan (Quantity): 升交点经度.
+            argp (Quantity): 近地点辐角.
+            nu (Quantity): 真近点角.
+            epoch (Quantity): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
+
+        Returns:
+            Orbit: 轨道.
+        """
+        orb = Orbit()
+        orb._assign_coe(attractor, a, e, inc, raan, argp, nu, epoch)
+        return orb
+
+    @staticmethod
+    @u.quantity_input(
+        r_vec=u.km,
+        v_vec=u.km/u.s,
+        epoch=u.s,
+    )
+    def from_rv(attractor, r_vec, v_vec, epoch):
+        """从rv状态向量创建Orbit对象
+
+        Args:
+            attractor (Body): 中心天体.
+            r_vec (ndarray[Quantity]): 位置矢量.
+            v_vec (ndarray[Quantity]): 速度矢量.
+            epoch (Quantity): KSPRO历元时刻, 自1951-02-01 00:00:00以来的秒数.
+
+        Returns:
+            Orbit: 轨道.
+        """
+        orb = Orbit()
+        orb._assign_rv(attractor, r_vec, v_vec, epoch)
+        return orb
     
     @classmethod
     def from_krpcv(cls, vessel: Vessel):
@@ -104,35 +146,31 @@ class Orbit:
         Args:
             vessel (Vessel): krpc Vessel
         """
-        orbit = vessel.orbit
-        ut = get_ut()
-        nu = orbit.true_anomaly
-        return cls.from_coe(orbit.body.name,
-                            orbit.semi_major_axis,
-                            orbit.eccentricity,
-                            orbit.inclination,
-                            orbit.longitude_of_ascending_node,
-                            orbit.argument_of_periapsis,
-                            nu,
-                            ut)
+        return cls.from_krpcorb(vessel.orbit)
 
 
     @classmethod
-    def from_krpcorb(cls, orbit: KRPCOrbit):
+    def from_krpcorb(cls, orbit: KRPCOrbit, ut=None):
         """从krpc Orbit对象创建Orbit对象
 
         Args:
             orbit (Orbit): krpc Orbit
+            ut (Quantity | None): epoch
         """
-        ut = get_ut()
-        return cls.from_coe(orbit.body.name,
-                            orbit.semi_major_axis,
-                            orbit.eccentricity,
-                            orbit.inclination,
-                            orbit.longitude_of_ascending_node,
-                            orbit.argument_of_periapsis,
-                            orbit.true_anomaly_at_ut(ut),
-                            ut)
+        ut = get_ut() if ut is None else ut.to_value(u.s)
+        nu = orbit.true_anomaly_at_ut(ut)
+        if nu < 0:
+            nu += 2 * np.pi
+        return cls.from_coe(
+            ATTRACTOR_DIC[orbit.body.name],
+            orbit.semi_major_axis * u.m,
+            orbit.eccentricity * u.one,
+            orbit.inclination * u.rad,
+            orbit.longitude_of_ascending_node * u.rad,
+            orbit.argument_of_periapsis * u.rad,
+            nu * u.rad,
+            ut * u.s,
+        )
 
     def launch_window(self, site_p, direction='SE', phase_diff=40, start_period=0, end_period=30):
         """返回发射场向轨道发射的最佳ut
@@ -149,8 +187,3 @@ class Orbit:
         """
         ut: float = orbit_launch_window(self, np.array(site_p), direction, phase_diff, start_period, end_period)
         return ut
-
-    
-        
-
-
