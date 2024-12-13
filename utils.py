@@ -68,12 +68,13 @@ def logging_around(func):
             
 ### GLOBAL CONNECTION ###
 
+UTIL_CONN = None
 UTIL_CONN = krpc.connect('krpclive', address='127.0.0.1', rpc_port=65534, stream_port=65535)
 
 ### IN-GAME TIME CONTROL ###
 
 def get_ut():
-    return int(UTIL_CONN.space_center.ut)
+    return UTIL_CONN.space_center.ut
 
 
 def time_wrap(start_time):

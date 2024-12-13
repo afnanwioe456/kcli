@@ -11,13 +11,15 @@ class Body:
                  r,
                  k,
                  soi,
-                 rotational_period,):
+                 rotational_period,
+                 atomsphere_height = 0 * u.km,):
         self.name = name
         self.attractor = attractor
         self.r = r
         self.k = k
         self.soi = soi
         self.rotational_period = rotational_period
+        self.atomsphere_height = atomsphere_height
         
     @cached_property
     def angular_velocity(self):
@@ -37,6 +39,7 @@ KSP_Earth = Body(
     3.9860044615e5 * u.km ** 3 / u.s ** 2,
     924649.216 * u.km,
     86164.1015625 * u.s,
+    atomsphere_height = 140 * u.km,
 )
 
 KSP_Moon = Body(
@@ -46,4 +49,5 @@ KSP_Moon = Body(
     4.9028000645e3 * u.km ** 3 / u.s ** 2,
     66167.16 * u.km,
     2370996.25 * u.s,
+    atomsphere_height = 0 * u.km,
 )

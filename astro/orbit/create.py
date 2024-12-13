@@ -73,7 +73,7 @@ class Orbit(OrbitBase):
         """
         orb = Orbit.from_coe(self.attractor, self.a, self.e, self.inc, 
                              self.raan, self.argp, nu, self.epoch)
-        orb._epoch += orb.delta_t - self.delta_t
+        orb._epoch = orb.delta_t - self.delta_t + orb._epoch  # 不要使用+=
         return orb
 
     @u.quantity_input(r=u.km)
@@ -130,7 +130,7 @@ class Orbit(OrbitBase):
             attractor (Body): 中心天体.
             r_vec (ndarray[Quantity]): 位置矢量.
             v_vec (ndarray[Quantity]): 速度矢量.
-            epoch (Quantity): KSPRO历元时刻, 自1951-02-01 00:00:00以来的秒数.
+            epoch (Quantity): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
 
         Returns:
             Orbit: 轨道.
@@ -138,6 +138,26 @@ class Orbit(OrbitBase):
         orb = Orbit()
         orb._assign_rv(attractor, r_vec, v_vec, epoch)
         return orb
+
+    @classmethod
+    def circular(cls, attractor, r_vec, h_i, epoch):
+        """圆轨道
+
+        Args:
+            attractor (Body): 中心天体
+            r_vec (Quantity): 位置矢量
+            h_i (Quantity): 角动量方向
+            epoch (Quantity): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
+
+        Returns:
+            Orbit: 圆轨道
+        """
+        r = np.linalg.norm(r_vec)
+        h = np.sqrt(attractor.k * r)
+        v_i = np.cross(h_i, r_vec)
+        v_i = v_i / np.linalg.norm(v_i)
+        v_vec = h / r * v_i
+        return cls.from_rv(attractor, r_vec, v_vec, epoch)
     
     @classmethod
     def from_krpcv(cls, vessel: Vessel):
@@ -187,3 +207,19 @@ class Orbit(OrbitBase):
         """
         ut: float = orbit_launch_window(self, np.array(site_p), direction, phase_diff, start_period, end_period)
         return ut
+
+    def cheat(self, ut=None):
+        if ut is None:
+            ut = get_ut() * u.s
+        orb = self.propagate_to_epoch(ut)
+        nu = orb.nu.to_value(u.rad)
+        e = orb.e.to_value(u.one)
+        E = nu2E(nu, e)
+        Me = E2Me(E, e)
+        return (f'SMA: {orb.a.to_value(u.m)}\n'
+                f'ECC: {orb.e.to_value(u.one)}\n'
+                f'INC: {orb.inc.to_value(u.deg)}\n'
+                f'MNA: {Me}\n'
+                f'LAN: {orb.raan.to_value(u.deg)}\n'
+                f'ARG: {orb.argp.to_value(u.deg)}')
+        

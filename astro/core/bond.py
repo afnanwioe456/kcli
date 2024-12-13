@@ -24,6 +24,8 @@ def bond(k, r1_vec, r2_vec, dt, prograde=True, max_iter=100, tol=1e-8):
     r2 = norm(r2_vec)
     c12 = cross(r1_vec, r2_vec)
     theta = arccos(r1_vec @ r2_vec / r1 / r2)
+    if theta == 0.0:
+        raise ValueError('Lambert solution cannot be computed for collinear vectors')
     if prograde and c12[2] <= 0:
         theta = 2 * pi - theta
     elif not prograde and c12[2] >= 0:
@@ -46,6 +48,9 @@ def bond(k, r1_vec, r2_vec, dt, prograde=True, max_iter=100, tol=1e-8):
         C = stumpff_c(z)
         S = stumpff_s(z)
         yz = r1 + r2 + A * (z * S - 1) / sqrt(C)
+        if yz < 0:
+            z = -z / 10  # 避免反复震荡
+            continue
         F = (yz / C) ** 1.5 * S + A * sqrt(yz) - sqrt(k) * dt
         if z == 0:
             dF = sqrt(2) / 40 * yz ** 1.5 + A / 8 * (sqrt(yz) + A * sqrt(1 / (2 * yz)))
