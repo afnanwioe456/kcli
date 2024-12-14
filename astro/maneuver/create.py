@@ -8,7 +8,7 @@ from krpc.services.spacecenter import Vessel, Node
 from .lambert_solver import *
 from .moon_transfer import *
 from ..orbit import Orbit
-from ..frame import OrbitalFrame, ECI
+from ..frame import OrbitalFrame, BCI
 
 if TYPE_CHECKING:
     from ..body import *
@@ -106,7 +106,7 @@ class Maneuver:
         nodes = vessel.control.nodes
         impulses = []
         for n in nodes:
-            burn_vector = ECI.from_left_hand(n.burn_vector(vessel.orbit.body.non_rotating_reference_frame))
+            burn_vector = BCI.transform_d_from_left_hand(n.burn_vector(vessel.orbit.body.non_rotating_reference_frame))
             impulses.append(((n.ut - epoch) * u.s, np.array(burn_vector) * u.m / u.s))
         return Maneuver(impulses, orb)
     

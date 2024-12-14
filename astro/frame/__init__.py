@@ -1,5 +1,5 @@
 from .create import (
-    ECI,
+    BCI,
     TNWFrame,
     OrbitalFrame,
     LocalAttitudeFrame,
