@@ -4,13 +4,11 @@ import sympy as sp
 from astropy import units as u
 from typing import TYPE_CHECKING
 
+from ..core.linear import angle_between_vectors
 from ..utils import sec_to_date
 
 if TYPE_CHECKING:
     from .create import Orbit
-
-def angle_between_vectors(vector_1, vector_2):
-    return np.arccos(np.dot(vector_1, vector_2) / (np.linalg.norm(vector_1) * np.linalg.norm(vector_2)))
 
 
 def orbit_launch_window(orbit: Orbit, site_position: np.ndarray, direction='SE', phase_diff=40, start_period=0, end_period=30):

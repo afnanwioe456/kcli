@@ -119,7 +119,7 @@ def transfer_start(moon: Body, orb_t: Orbit, orb_v: Orbit):
     orb_moon = orb_moon.propagate_to_epoch(orb_t.epoch)
     r, _ = _get_radius(orb_v, -r_cap)
     a = (np.linalg.norm(r_cap) + r) / 2
-    k = orb_t.k
+    k = orb_t.attractor.k
     T = period(a.to_value(u.km), k.to_value(u.km ** 3 / u.s ** 2)) * u.s
     v = np.sqrt(- k / a + 2 * k / r)
     r_vec = np.array([r.to_value(u.km), 0, 0], dtype=np.float64) * u.km

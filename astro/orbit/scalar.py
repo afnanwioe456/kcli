@@ -5,6 +5,7 @@ import numpy as np
 from astropy import units as u
 
 from ..core.kepler import *
+from ..utils import sec_to_date
 
 if TYPE_CHECKING:
     from ..body import Body
@@ -24,10 +25,6 @@ class OrbitBase:
         self._v_vec: np.ndarray[u.Quantity] = None
     
     @property
-    def k(self):
-        return self.attractor.k
-
-    @property
     def epoch(self):
         return self._epoch
 
@@ -41,12 +38,12 @@ class OrbitBase:
     def h(self):
         if self._h is None:
             h = a2h(self.a.to_value(u.km),
-                    self.k.to_value(u.km ** 3 / u.s ** 2),
+                    self.attractor.k.to_value(u.km ** 3 / u.s ** 2),
                     self.e.to_value(u.one))
             self._h = h * u.km ** 2 / u.s
         return self._h
 
-    @property
+    @cached_property
     def h_vec(self):
         return np.cross(self.r_vec, self.v_vec)
 
@@ -90,6 +87,10 @@ class OrbitBase:
             self._to_rv()
         return self._r_vec
 
+    @cached_property
+    def r(self):
+        return np.linalg.norm(self.r_vec)
+
     @property
     def v_vec(self):
         if self._v_vec is None:
@@ -97,15 +98,39 @@ class OrbitBase:
         return self._v_vec
 
     @cached_property
+    def v(self):
+        return np.linalg.norm(self.v_vec)
+
+    @cached_property
+    def vt(self):
+        return self.h / self.r
+
+    @cached_property
+    def vt_vec(self):
+        vt_v = np.cross(self.h_vec, self.r_vec)
+        vt_i = vt_v / np.linalg.norm(vt_v)
+        return vt_i * self.vt
+
+    @cached_property
+    def vr(self):
+        return np.sqrt(self.v ** 2 - self.vt ** 2)
+
+    @cached_property
+    def vr_vec(self):
+        vr = self.vr if self.nu < np.pi * u.rad else -self.vr
+        vr_i = self.r_vec / self.r
+        return vr_i * vr
+
+    @cached_property
     def period(self):
         if self.e >= 1:
             return np.inf * u.s
         return period(
             self.a.to_value(u.km),
-            self.k.to_value(u.km ** 3 / u.s ** 2)
+            self.attractor.k.to_value(u.km ** 3 / u.s ** 2)
             ) * u.s
 
-    @property
+    @cached_property
     def delta_t(self):
         """从近地点到真近点角的Δt"""
         return self.delta_t_at_nu(self.nu)
@@ -122,7 +147,7 @@ class OrbitBase:
         return nu2dt_h(
             nu.to_value(u.rad), 
             self.e.to_value(u.one), 
-            self.k.to_value(u.km ** 3 / u.s ** 2), 
+            self.attractor.k.to_value(u.km ** 3 / u.s ** 2), 
             self.h.to_value(u.km ** 2 / u.s)
             ) * u.s
     
@@ -133,7 +158,7 @@ class OrbitBase:
             nu.to_value(u.rad),
             self.h.to_value(u.km ** 2 / u.s),
             self.e.to_value(u.one),
-            self.k.to_value(u.km ** 3 / u.s ** 2)
+            self.attractor.k.to_value(u.km ** 3 / u.s ** 2)
         ) * u.km
 
     @cached_property
@@ -180,7 +205,7 @@ class OrbitBase:
                 self.raan.to_value(u.rad),
                 self.argp.to_value(u.rad),
                 self.nu.to_value(u.rad),
-                self.k.to_value(u.km ** 3 / u.s ** 2))
+                self.attractor.k.to_value(u.km ** 3 / u.s ** 2))
             self._r_vec = r_vec * u.km
             self._v_vec = v_vec * u.km / u.s
         else:
@@ -193,7 +218,7 @@ class OrbitBase:
         elif self._has_rv_state():
             h, e, inc, raan, argp, nu = rv2coe(self._r_vec.to_value(u.km),
                                                self._v_vec.to_value(u.km / u.s),
-                                               self.k.to_value(u.km ** 3/ u.s ** 2))
+                                               self.attractor.k.to_value(u.km ** 3/ u.s ** 2))
             self._h = h * u.km ** 2 / u.s
             self._e = e * u.one
             self._inc = inc * u.rad
@@ -201,7 +226,7 @@ class OrbitBase:
             self._argp = argp * u.rad
             self._nu = nu * u.rad
             a = h2a(self.h.to_value(u.km ** 2 / u.s),
-                    self.k.to_value(u.km ** 3 / u.s ** 2),
+                    self.attractor.k.to_value(u.km ** 3 / u.s ** 2),
                     self.e.to_value(u.one))
             self._a = a * u.km
         else: 
@@ -220,9 +245,15 @@ class OrbitBase:
         if e < 0:
             e = e + 2 * np.pi * u.rad
         return e
+    
+    def _correct_inc(self, e):
+        e = e % (np.pi * u.rad)
+        if e < 0:
+            e = e + np.pi * u.rad
+        return e
 
     def _assign_coe(self, attractor, a, e, inc, raan, argp, nu, epoch):
-        inc = self._correct_coe(inc)
+        inc = self._correct_inc(inc)
         raan = self._correct_coe(raan)
         argp = self._correct_coe(argp)
         nu = self._correct_coe(nu)
@@ -236,3 +267,8 @@ class OrbitBase:
         self._epoch = epoch
         self._r_vec, self._v_vec = r_vec, v_vec
         
+    def __str__(self):
+        return (f"Orbit {round(self.pe.to_value(u.km), 2)} * "
+                f"{round(self.ap.to_value(u.km), 2)} km "
+                f"around {self.attractor.name} "
+                f"at {sec_to_date(int(self.epoch.to_value(u.s)))}")

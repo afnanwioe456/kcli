@@ -1,12 +1,12 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
-import warnings
 from astropy import units as u
 from krpc.services.spacecenter import Vessel, Node
 
 from .lambert_solver import *
 from .moon_transfer import *
+from .planner import *
 from ..orbit import Orbit
 from ..frame import OrbitalFrame, BCI
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 class Maneuver:
     def __init__(self, impulses, orbit: Orbit):
-        """一系列轨道机动
+        """轨道机动序列
 
         Args:
             impulses (list[tuple]): 脉冲机动, [(dt, ndarray[v0, v1, v2]), ...]
@@ -72,7 +72,7 @@ class Maneuver:
             orbits.append(orb)
         if intermediate:
             return tuple(orbits)
-        return orbits[-1]
+        return orbits[-1] if len(orbits) > 0 else self.orbit
 
     def to_krpcv(self, vessel: Vessel, clear=True) -> list[Node]:
         """创建机动节点
@@ -109,22 +109,29 @@ class Maneuver:
             burn_vector = BCI.transform_d_from_left_hand(n.burn_vector(vessel.orbit.body.non_rotating_reference_frame))
             impulses.append(((n.ut - epoch) * u.s, np.array(burn_vector) * u.m / u.s))
         return Maneuver(impulses, orb)
+
+    @staticmethod
+    def change_apoapsis(orbit: Orbit, ap: u.Quantity):
+        imps = apoapsis_planner(orbit, ap)
+        return Maneuver(imps, orbit)
+
+    @staticmethod
+    def change_periapsis(orbit: Orbit, pe: u.Quantity):
+        imps = periapsis_planner(orbit, pe)
+        return Maneuver(imps, orbit)
+
+    @staticmethod
+    def match_plane(orb_v: Orbit, 
+                    orb_t: Orbit, 
+                    closest: bool = False,
+                    conserved: bool = True):
+        imps = match_plane_planner(orb_v, orb_t, closest, conserved)
+        return Maneuver(imps, orb_v)
     
     @staticmethod
-    def lambert(orbit_v: Orbit, orbit_t: Orbit, solver=bond, **kwargs):
-        k = orbit_v.k.to_value(u.km ** 3 / u.s ** 2)
-        r1 = orbit_v.r_vec.to_value(u.km)
-        r2 = orbit_t.r_vec.to_value(u.km)
-        dt = (orbit_t.epoch - orbit_v.epoch).to_value(u.s)
-        try:
-            v1, v2 = solver(k, r1, r2, dt, **kwargs)
-        except ValueError as e:
-            warnings.warn(f"solver '{solver.__name__}' failed: {e}, retrying with other solver", RuntimeWarning, 2)
-            v1, v2 = izzo(k, r1, r2, dt, **kwargs)
-        imp1 = v1 * u.km / u.s - orbit_v.v_vec
-        imp2 = orbit_t.v_vec - v2 * u.km / u.s
-        imps = [(0 * u.s, imp1), (dt * u.s, imp2)]
-        return Maneuver(imps, orbit_v)
+    def lambert(orb_v: Orbit, orb_t: Orbit, solver=bond, **kwargs):
+        imps = lambert_planner(orb_v, orb_t, solver, **kwargs)
+        return Maneuver(imps, orb_v)
 
     @staticmethod
     def opt_bi_impulse_rdv(orbit_v: Orbit, orbit_t: Orbit, **kwargs) -> Maneuver | None:

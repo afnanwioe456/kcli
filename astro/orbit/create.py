@@ -35,7 +35,7 @@ class Orbit(OrbitBase):
         dt = t.to_value(u.s)
         r_vec = self.r_vec.to_value(u.km)
         v_vec = self.v_vec.to_value(u.km / u.s)
-        k = self.k.to_value(u.km ** 3 / u.s ** 2)
+        k = self.attractor.k.to_value(u.km ** 3 / u.s ** 2)
         r1_vec, v1_vec = rv2rv_delta_t(r_vec, v_vec, dt, k, tol, max_iter)
         return self.from_rv(
             self.attractor,
@@ -60,20 +60,24 @@ class Orbit(OrbitBase):
         return self.propagate(dt, tol, max_iter)
 
     @u.quantity_input(nu=u.rad)
-    def propagate_to_nu(self, nu):
+    def propagate_to_nu(self, nu, prograde=False, M=0):
         """传播到指定真近点角的轨道
 
         Args:
             nu (Quantity): 真近点角
-            tol (float, optional): 误差. Defaults to 1e-8.
-            max_iter (int, optional): 最大迭代数. Defaults to 100.
+            prograde (bool): 严格按正向传播
+            M (int): 传播经过的完整周期
 
         Returns:
             Orbit: 传播后的轨道
         """
         orb = Orbit.from_coe(self.attractor, self.a, self.e, self.inc, 
                              self.raan, self.argp, nu, self.epoch)
-        orb._epoch = orb.delta_t - self.delta_t + orb._epoch  # 不要使用+=
+        dt = orb.delta_t - self.delta_t
+        if prograde and dt < 0:
+            dt += self.period
+        dt += M * self.period
+        orb._epoch = dt + orb._epoch  # 不要使用+=
         return orb
 
     @u.quantity_input(r=u.km)
@@ -82,7 +86,7 @@ class Orbit(OrbitBase):
             r.to_value(u.km),
             self.h.to_value(u.km ** 2 / u.s),
             self.e.to_value(u.one),
-            self.k.to_value(u.km ** 3 / u.s ** 2),
+            self.attractor.k.to_value(u.km ** 3 / u.s ** 2),
             sign
         ) * u.rad
         return self.propagate_to_nu(nu)

@@ -1,4 +1,4 @@
-from numpy import cos, arccos, sin, pi, sqrt, tan, arctan, arctanh, sinh, cosh, tanh, dot, cross, float64, array
+from numpy import cos, arccos, sin, pi, sqrt, tan, arctan, arctanh, sinh, cosh, tanh, dot, cross, float64, array, inf
 from numpy.linalg import norm
 from numba import njit
 
@@ -7,6 +7,8 @@ from .rotation import *
 
 @njit
 def nu2r(nu, h, e, GM):
+    if cos(nu) <= -1 / e:
+        return inf
     return h ** 2 / GM / (1 + e * cos(nu))
 
 @njit
