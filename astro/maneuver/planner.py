@@ -2,7 +2,7 @@ import numpy as np
 import warnings
 from astropy import units as u
 
-from ..core.kepler import a2h
+from ..core.kepler import *
 from ..core.linear import angle_between_vectors
 from ..core.bond import bond
 from ..core.izzo import izzo
@@ -100,8 +100,37 @@ def lambert_planner(orb_v: Orbit, orb_t: Orbit, solver=bond, **kwargs):
         v1, v2 = solver(k, r1, r2, dt, **kwargs)
     except ValueError as e:
         warnings.warn(f"solver '{solver.__name__}' failed: {e}, retrying with other solver", RuntimeWarning, 2)
-        v1, v2 = izzo(k, r1, r2, dt, **kwargs)
+        v1, v2 = izzo(k, r1, r2, tof=dt, **kwargs)
     imp1 = v1 * u.km / u.s - orb_v.v_vec
     imp2 = orb_t.v_vec - v2 * u.km / u.s
     imps = [(0 * u.s, imp1), (dt * u.s, imp2)]
     return imps
+
+def change_phase_planner(orb: Orbit, revisit, inner, conserved=True):
+    period = orb.period
+    dt = revisit - orb.epoch
+    limit_T = T(
+        (orb.r / 2).to_value(u.km),
+        orb.attractor.k.to_value(u.km ** 3 / u.s ** 2)
+        ) * u.s
+    M = dt // period
+    if inner != True and M == 0:
+        return
+    if inner == True:
+        inter_T = dt / (M + 1)
+    else:
+        inter_T = dt / M
+    if inter_T < limit_T:
+        return
+    dv = _get_dv(orb, inter_T)
+    imp = orb.v_vec / orb.v * dv
+    if conserved:
+        return [(0 * u.s, imp), (dt, -imp)]
+    else:
+        return [(0 * u.s, imp)]
+
+def _get_dv(orb: Orbit, T):
+    v0 = orb.v
+    v1 = T2v(T, orb.r.to_value(u.km), orb.attractor.k.to_value(u.km ** 3 / u.s ** 2)) * u.km / u.s
+    return v1 - v0
+    

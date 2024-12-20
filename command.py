@@ -7,7 +7,7 @@ from .task.launch import *
 from .task.tasks import Tasks
 from .spacecrafts import *
 from .utils import *
-from .natural_command_process import natural_command
+from .ncp import natural_command
 
 if TYPE_CHECKING:
     from task.tasks import TaskQueue, Task

@@ -25,25 +25,42 @@ class Maneuver:
         self._impulses = impulses
         self._orbit = orbit
 
-    @property
-    def orbit(self):
-        return self._orbit
-
-    def change_orbit(self, orbit: Orbit):
-        dt = orbit.epoch - self._orbit.epoch
-        for i in range(len(self._impulses)):
-            self._impulses[i] = (self._impulses[i][0] - dt, self._impulses[i][1])
-        self._orbit = orbit
-
     def __getitem__(self, key):
         return self._impulses[key]
 
     def __str__(self):
         s = ''
         for i in range(len(self._impulses)):
-            s += f'Impulse {i}: {self._impulses[i][0]}, {self._impulses[i][1]}\n'
-        s += f'Total Δv: {self.get_total_cost()}'
+            s += (f'Impulse {i}: {round(self._impulses[i][0].to_value(u.s), 2)} s, '
+                  f'{np.round(self._impulses[i][1].to_value(u.km / u.s), 2)} km/s\n')
+        s += f'Total Δv: {round(self.get_total_cost().to_value(u.km / u.s), 2)} km/s'
         return s
+
+    @property
+    def orbit(self):
+        return self._orbit
+
+    def change_orbit(self, orbit: Orbit):
+        dt = orbit.epoch - self._orbit.epoch
+        imps = []
+        for i in range(len(self._impulses)):
+            imps.append((self._impulses[i][0] - dt, self._impulses[i][1]))
+        return Maneuver(imps, orbit)
+        
+    def merge(self, mnv: Maneuver):
+        if len(mnv._impulses) == 0:
+            return self
+        mnv = mnv.change_orbit(self.orbit)
+        if len(self._impulses) == 0:
+            return mnv
+        if abs(self._impulses[-1][0] - mnv._impulses[0][0]) < 1 * u.s:
+            # 如果两个脉冲几乎重叠
+            self._impulses[-1] = (self._impulses[-1][0],
+                                  self._impulses[-1][1] + mnv._impulses[0][1])
+            self._impulses += mnv._impulses[1:]
+        else:
+            self._impulses += mnv._impulses
+        return self
 
     def get_total_cost(self):
         total = 0
@@ -55,7 +72,7 @@ class Maneuver:
         orbits = self.apply(intermediate=True)
         for i in range(len(orbits) - 1):
             orb = orbits[i]
-            safe = orb.is_safe_before(orb.propagate_to_epoch(orbits[i + 1].epoch).nu)
+            safe = orb.is_safe_before(orbits[i + 1].epoch)
             if not safe:
                 return False
         return True
@@ -127,6 +144,62 @@ class Maneuver:
                     conserved: bool = True):
         imps = match_plane_planner(orb_v, orb_t, closest, conserved)
         return Maneuver(imps, orb_v)
+
+    @staticmethod
+    def change_phase(orb: Orbit,
+                     revisit_epoch: u.Quantity,
+                     at_pe = False,
+                     safety_check = True,
+                     conserved = True):
+        """调相机动
+
+        Args:
+            orb (Orbit): 航天器轨道
+            revisit_epoch (u.Quantity): 重访时刻
+            at_pe (bool, optional): 允许近星点处的转移. Defaults to False.
+            safety_check (bool, optional): 安全检测. Defaults to True.
+            conserved (bool, optional): 恢复原轨道. Defaults to True.
+
+        Raises:
+            ValueError: 无解, 尝试兰伯特机动
+
+        Returns:
+            Maneuver: 调相机动
+        """
+        dt = revisit_epoch - orb.epoch
+        M = dt // orb.period
+        if M >= 10:  # 周期数过多可能导致机动过小
+            revisit_epoch = orb.epoch + 10 * orb.period + dt % orb.period
+            conserved = True
+        mnvs: list[Maneuver] = []
+        inner_imps = change_phase_planner(orb, revisit_epoch, True, conserved)
+        if inner_imps is not None:
+            mnvs.append(Maneuver(inner_imps, orb))
+        outer_imps = change_phase_planner(orb, revisit_epoch, False, conserved)
+        if outer_imps is not None:
+            mnvs.append(Maneuver(outer_imps, orb))
+        if at_pe:
+            orb_pe = orb.propagate_to_nu(0 * u.rad, True)
+            dt = orb_pe.epoch - orb.epoch
+            revisit_pe = revisit_epoch - (orb.period - dt)
+            inner_imps = change_phase_planner(orb_pe, revisit_pe, True, True)
+            if inner_imps is not None:
+                mnvs.append(Maneuver(inner_imps, orb_pe).change_orbit(orb))
+            outer_imps = change_phase_planner(orb_pe, revisit_pe, False, True)
+            if outer_imps is not None:
+                mnvs.append(Maneuver(outer_imps, orb_pe).change_orbit(orb))
+        min_dv = np.inf * u.km / u.s
+        best_mnv = None
+        for m in mnvs:
+            if safety_check and not m.is_safe():
+                continue
+            dv = m.get_total_cost()
+            if dv < min_dv:
+                min_dv = dv
+                best_mnv = m
+        if best_mnv is None:
+            raise ValueError('No possible solution')
+        return best_mnv
     
     @staticmethod
     def lambert(orb_v: Orbit, orb_t: Orbit, solver=bond, **kwargs):
@@ -160,36 +233,70 @@ class Maneuver:
         return opt_lambert_revolution(orbit_v, orbit_t)
 
     @classmethod
-    def moon_transfer_target(cls, orb_v: Orbit, moon: Body, cap_t: u.Quantity, pe: u.Quantity = 100. * u.km):
+    def moon_transfer_target(cls, 
+                             orb_v: Orbit, 
+                             moon: Body, 
+                             cap_t: u.Quantity, 
+                             pe: u.Quantity = 100 * u.km,
+                             rel_inc: u.Quantity = 0 * u.rad,
+                             radial: bool = False):
+        """卫星转移瞄准轨道
+
+        Args:
+            orb_v (Orbit): 航天器轨道
+            moon (Body): 卫星
+            cap_t (u.Quantity): 捕获时刻
+            pe (u.Quantity, optional): 捕获轨道的近星点高度. Defaults to 100*u.km.
+            rel_inc (u.Quantity, optional): 捕获轨道与卫星轨道的相对倾角. Defaults to 0*u.rad.
+            radial (bool, optional): 径向捕获. Defaults to False.
+
+        Returns:
+            Orbit: 转移瞄准轨道
+        """
         rp_m = pe + moon.r
-        orb_target = transfer_target(orb_v, moon, cap_t, orb_v.rp, rp_m, 0 * u.rad)
+        if radial:
+            orb_target = transfer_target_radial(orb_v, moon, cap_t, rp_m, rel_inc)
+        else:
+            orb_target = transfer_target(orb_v, moon, cap_t, rp_m, rel_inc)
+        orb_transfer = orb_target.propagate_to_nu(0*u.rad, True, -1)
+        if orb_transfer.epoch < orb_v.epoch:
+            cap_t += orb_v.epoch - orb_transfer.epoch + 600 * u.s
+            warnings.warn(f'orbit already passed transfer window, trying capture time {cap_t}', RuntimeWarning)
+            return cls.moon_transfer_target(orb_v, moon, cap_t, pe, rel_inc, radial)
         return orb_target
 
     @classmethod
-    def moon_transfer(cls,
-                      orb_v: Orbit, 
-                      moon: Body, 
-                      cap_t: u.Quantity,
-                      pe: u.Quantity = 100. * u.km):
+    def moon_transfer(cls, orb_v: Orbit, orb_t: Orbit):
         """卫星转移机动: 
 
         Args:
             orb_v (Orbit): 航天器轨道
-            target (Body): 卫星
-            cap_t (Quantity): 捕获时刻
-            pe (Quantity): 捕获轨道的近星点高度
+            orb_t (Orbit): 瞄准轨道
 
         Returns:
-            Maneuver, orbit: 转移机动, 瞄准轨道
+            Maneuver: 转移机动
         """
-        # TODO: 非共面转移
-        orb_target = cls.moon_transfer_target(orb_v, moon, cap_t, pe)
-        orb_transfer = transfer_start(moon, orb_target, orb_v)
-        orbit_start = orb_v.propagate_to_epoch(orb_transfer.epoch)
-        t = orb_transfer.epoch - orb_v.epoch
-        imp = orb_transfer.v_vec - orbit_start.v_vec
-        mnv = Maneuver([(t, imp)], orb_v)
-        return mnv, orb_target
+        # if radial:
+        #     orb_transfer = transfer_start_radial(moon, orb_t, orb_v)
+        #     orbit_start = orb_v.propagate_to_epoch(orb_transfer.epoch)
+        #     t = orb_transfer.epoch - orb_v.epoch
+        #     dv_vec = orb_transfer.v_vec - orbit_start.v_vec
+        #     mnv = Maneuver([(t, dv_vec)], orb_v)
+        #     return mnv, orb_t
+        # 如果使用非径向转移,
+        # 那么必须先匹配轨道倾角
+        # 再进行一次调相机动进入转移窗口
+        orb_transfer = orb_t.propagate_to_nu(0*u.rad, True, -1)
+        mnv_coplanar = Maneuver.match_plane(orb_v, orb_transfer, True, True)
+        orb_coplanar = mnv_coplanar.apply()
+        transfer_nu = orb_coplanar.nu_at_direction(orb_transfer.r_vec)
+        orb_coplanar = orb_coplanar.propagate_to_nu(transfer_nu, True)
+        mnv_phase = Maneuver.change_phase(orb_coplanar, orb_transfer.epoch, True, True, False)
+        orb_start = mnv_phase.apply()
+        orb_start = orb_start.propagate_to_epoch(orb_transfer.epoch)
+        mnv_transfer = Maneuver([(0 * u.s, orb_transfer.v_vec - orb_start.v_vec)], orb_start)
+        mnv_series = mnv_coplanar.merge(mnv_phase).merge(mnv_transfer)
+        return mnv_series
 
     @classmethod
     def course_correction(cls, orb_v: Orbit, orb_t: Orbit, dt=5*u.min):

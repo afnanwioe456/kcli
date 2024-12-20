@@ -3,9 +3,9 @@ from concurrent.futures import ThreadPoolExecutor
 import asyncio
 from time import sleep
 
-import listener
-from utils import LOGGER
-import task.tasks as tasks
+from .listener import Listener
+from .utils import LOGGER
+from .task.tasks import TaskQueue
 
 
 
@@ -16,7 +16,7 @@ def listener_loop():
         if command is None:
             sleep(3)
             continue
-        if listener.is_stop_sign(command):
+        if Listener.is_stop_sign(command):
             asyncio.run(chat_listener._stop())
             sleep(3)
             break
@@ -55,9 +55,9 @@ def thread_pool():
     print('Thread pool executor finished.')
 
 
-task_queue = tasks.TaskQueue()
+task_queue = TaskQueue()
 worker_lock = threading.Lock()  # 限制只有一个线程可以控制
-chat_listener = listener.Listener(27765315, 'e792a714%2C1734606751%2Cb60e3%2A61CjCtESKwChxHgvYUmgEz0oYBgsJ_3a_otvBzV8Agu8NWK8lfbHDj1m4lO_bIwjgwuQQSVkthTzhGYWM1Z0hqYXFxaE9pX1lHQ0RzXzRENThjNnRjdXZLTEQwczlUcUpGNDVwdjA3ZXplcHNBX3BwOGhsaUpNcHFhMXFCdDljYjRWNjJERGlYNGxBIIEC')
+chat_listener = Listener(27765315, 'e792a714%2C1734606751%2Cb60e3%2A61CjCtESKwChxHgvYUmgEz0oYBgsJ_3a_otvBzV8Agu8NWK8lfbHDj1m4lO_bIwjgwuQQSVkthTzhGYWM1Z0hqYXFxaE9pX1lHQ0RzXzRENThjNnRjdXZLTEQwczlUcUpGNDVwdjA3ZXplcHNBX3BwOGhsaUpNcHFhMXFCdDljYjRWNjJERGlYNGxBIIEC')
 
 chat_thread = threading.Thread(target=listener_loop)
 loop_thread = threading.Thread(target=thread_pool)

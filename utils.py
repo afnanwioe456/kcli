@@ -111,12 +111,12 @@ def date_to_sec(input_date: str) -> int | None:
         return seconds_since_ksp_epoch
 
 
-def sec_to_date(seconds: int) -> datetime:
+def sec_to_date(seconds) -> datetime:
     """
     自1951-01-01 00:00:00的秒数转换为datetime对象
     """
     epoch = datetime(1951, 1, 1, 0, 0, 0)
-    time_difference = timedelta(seconds=seconds)
+    time_difference = timedelta(seconds=int(seconds))
     result_datetime = epoch + time_difference
     return result_datetime
 

@@ -1,19 +1,24 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
+from scipy.optimize import dual_annealing
 from numba import njit
 from astropy import units as u
 
-from ..core.kepler import a2h, r2nu, period
+from ..core.kepler import *
 from ..orbit import Orbit
 from ..frame import OrbitalFrame, PQWFrame
 
 if TYPE_CHECKING:
     from ..body import *
 
+###
+# 径向方向转移, 总是从卫星速度径向入射, 时间和能量都不是最优的
+# 在轨道参考系下计算
+###
 
 @njit
-def flyby(rp_p, rp_m, rm_vec, vm_vec, GM_p, GM_m, soi, rel_inc):
+def _moon_flyby_radial(rp_p, rp_m, rm_vec, vm_vec, GM_p, GM_m, soi, rel_inc):
     # 估算剩余速度
     # TODO: 估算转移轨道远地点为月球轨道高度, 不够准确
     rm = np.linalg.norm(rm_vec)
@@ -36,33 +41,34 @@ def flyby(rp_p, rp_m, rm_vec, vm_vec, GM_p, GM_m, soi, rel_inc):
     v_rel = np.array([v_rel[0], v_rel[1] * np.cos(rel_inc), -v_rel[1] * np.sin(rel_inc)], dtype=np.float64)
     return r_rel, v_rel
 
-def transfer_target(orbit: Orbit, moon: Body, cap_t, rp_p, rp_m, rel_inc):
+def transfer_target_radial(orbit: Orbit, moon: Body, cap_t, rp_m, rel_inc):
     """向卫星转移的瞄准轨道, 位于捕获临界前
 
     Args:
+        orbit (Orbit): 航天器轨道
         moon (Body): 卫星
         cap_t (Quantity): 捕获瞄准时刻
-        rp_p (Quantity): 出发轨道近地点
-        rp_m (Quantity): 停泊轨道瞄准近地点
+        rp_m (Quantity): 停泊轨道瞄准近星点
         rel_inc (Quantity): 瞄准轨道与卫星轨道面夹角(-pi~pi)
 
     Returns:
         Orbit: 转移瞄准轨道
     """
     orb_m = moon.orbit.propagate_to_epoch(cap_t)
-    rm_vec = orb_m.r_vec.to_value(u.km)
+    rm_vec = orb_m.r_vec
+    rp_p = orbit.r_at_nu(orbit.nu_at_direction(-rm_vec)).to_value(u.km)
+    rm_vec = orb_m.r_vec.to_value(u.km / u.s)
     vm_vec = orb_m.v_vec.to_value(u.km / u.s)
-    rp_p = rp_p.to_value(u.km)
     rp_m = rp_m.to_value(u.km)
     GM_p = moon.attractor.k.to_value(u.km ** 3 / u.s ** 2)
     GM_m = moon.k.to_value(u.km ** 3 / u.s ** 2)
     soi = moon.soi.to_value(u.km)
     rel_inc = rel_inc.to_value(u.rad)
 
-    r_rel, v_rel = flyby(rp_p, rp_m, rm_vec, vm_vec, GM_p, GM_m, soi, rel_inc)
+    r_rel, v_rel = _moon_flyby_radial(rp_p, rp_m, rm_vec, vm_vec, GM_p, GM_m, soi, rel_inc)
     r_rel *= u.km
     v_rel *= (u.km / u.s)
-    cap_t = _find_transfer(moon, orbit, r_rel, cap_t)
+    cap_t = _find_transfer_window(moon, orbit, r_rel, cap_t)
     orb_m = orb_m.propagate_to_epoch(cap_t)
     ref = OrbitalFrame.from_orbit(orb_m)
     rp_vec = ref.transform_p_to_parent(r_rel)
@@ -70,7 +76,7 @@ def transfer_target(orbit: Orbit, moon: Body, cap_t, rp_p, rp_m, rel_inc):
     orb_target = Orbit.from_rv(moon.attractor, rp_vec, vp_vec, cap_t)
     return orb_target
 
-def _find_transfer(moon: Body, orbit: Orbit, r_rel, cap_t_guess, tol=1e-8, max_iter=35):
+def _find_transfer_window(moon: Body, orbit: Orbit, r_rel, cap_t_guess, tol=1e-8, max_iter=35):
     """寻找合适的转移窗口, 航天器轨道高度<<卫星轨道高度
     从一个合适的猜测捕获时刻开始, 求转移轨道拱线进而得到出发时刻, 
     比较出发时刻转移轨道相位与航天器相位, 将航天器传播到转移轨道相位,
@@ -84,13 +90,16 @@ def _find_transfer(moon: Body, orbit: Orbit, r_rel, cap_t_guess, tol=1e-8, max_i
     step = 0
     while diff > tol and step < max_iter:
         cap_t += dt
+        # 将r_rel转到固定参考系
         orb_m = orb_m.propagate_to_epoch(cap_t)
         ref = OrbitalFrame.from_orbit(orb_m)
         r_vec = ref.transform_p_to_parent(r_rel)
         r, nu_t = _get_radius(orbit, -r_vec)
+        # 估算转移时间
         a = (np.linalg.norm(r_vec) + r) / 2
-        T = period(a.to_value(u.km), orbit.attractor.k.to_value(u.km ** 3 / u.s ** 2)) * u.s
+        T = T(a.to_value(u.km), orbit.attractor.k.to_value(u.km ** 3 / u.s ** 2)) * u.s
         trans_t = cap_t - T / 2
+        # 检查航天器与窗口的相位差
         orb_r = orb_v.propagate_to_epoch(trans_t)
         diff = abs(nu_t - orb_r.nu).to_value(u.rad)
         dt = orb_r.delta_t_at_nu(nu_t) - orb_r.delta_t
@@ -99,14 +108,10 @@ def _find_transfer(moon: Body, orbit: Orbit, r_rel, cap_t_guess, tol=1e-8, max_i
 
 def _get_radius(orbit: Orbit, r_vec):
     """求r_vec方向的轨道径长和真近点角"""
-    r_vec = PQWFrame.from_orbit(orbit).transform_d_from_parent(r_vec).to_value(u.km)
-    nu = np.arctan2(r_vec[1], r_vec[0])  # arctan象限不清
-    if nu < 0:
-        nu += 2 * np.pi
-    nu = nu * u.rad
+    nu = orbit.nu_at_direction(r_vec)
     return orbit.r_at_nu(nu), nu
 
-def transfer_start(moon: Body, orb_t: Orbit, orb_v: Orbit):
+def transfer_start_radial(moon: Body, orb_t: Orbit, orb_v: Orbit):
     # 构建初始轨道
     orb_moon = moon.orbit
     r_cap = orb_t.r_vec
@@ -115,12 +120,14 @@ def transfer_start(moon: Body, orb_t: Orbit, orb_v: Orbit):
     h_cap = np.cross(r_cap, v_cap)
     w = h_cap / np.linalg.norm(h_cap)
     q = np.cross(w, p)
+    # 初始轨道PQW参考系
     ref = PQWFrame.from_vectors(p, q, w)
     orb_moon = orb_moon.propagate_to_epoch(orb_t.epoch)
+    # 用径长估计转移轨道
     r, _ = _get_radius(orb_v, -r_cap)
     a = (np.linalg.norm(r_cap) + r) / 2
     k = orb_t.attractor.k
-    T = period(a.to_value(u.km), k.to_value(u.km ** 3 / u.s ** 2)) * u.s
+    T = T(a.to_value(u.km), k.to_value(u.km ** 3 / u.s ** 2)) * u.s
     v = np.sqrt(- k / a + 2 * k / r)
     r_vec = np.array([r.to_value(u.km), 0, 0], dtype=np.float64) * u.km
     v_vec = np.array([0, v.to_value(u.km/u.s), 0], dtype=np.float64) * u.km / u.s
@@ -129,3 +136,91 @@ def transfer_start(moon: Body, orb_t: Orbit, orb_v: Orbit):
     trans_t = orb_t.epoch - T / 2
     orb_trans_start = Orbit.from_rv(moon.attractor, r_vec, v_vec, trans_t)
     return orb_trans_start
+
+###
+# 寻找匹配pe的最小e, 仅适用于pe较小值
+# 在轨道参考系下的计算
+# e-行星 m-卫星
+###
+
+@njit
+def _flyby_rv(rp_m, e, rel_inc, raan, argp, soi, GMm):
+    # 根据捕获轨道参数转换为状态向量
+    v_esc2 = (e - 1) * GMm / rp_m
+    h = rp_m * np.sqrt(v_esc2 + 2 * GMm / rp_m)
+    nu = np.arccos((h ** 2 / (GMm * soi) - 1) / e)
+    nu = 2 * np.pi - nu
+    rcap_vec, vcap_vec = coe2rv(h, e, rel_inc, raan, argp, nu, GMm)
+    return rcap_vec, vcap_vec
+
+@njit
+def _transfer_rp(paras, e, rp_m, rel_inc, rm_vec, vm_vec, soi, GMm, GMe):
+    """给定捕获轨道e, raan, argp, 求转移轨道pe"""
+    raan, argp = paras[0], paras[1]
+    rcap_vec, vcap_vec = _flyby_rv(rp_m, e, rel_inc, raan, argp, soi, GMm)
+    re_vec = rm_vec + rcap_vec
+    ve_vec = vm_vec + vcap_vec
+    he, ee = rv2he(re_vec, ve_vec, GMe)
+    rp_e = nu2r(0, he, ee, GMe)
+    return rp_e
+
+def _min_rp_at_e(e, rp_m, rel_inc, rm_vec, vm_vec, soi, GMm, GMe):
+    """给定捕获轨道e, 寻找最小转移轨道pe"""
+    args = (e, rp_m, rel_inc, rm_vec, vm_vec, soi, GMm, GMe)
+    bounds = [(0, 2 * np.pi), (0, 2 * np.pi)]
+    # TODO: 限制顺逆行轨道
+    result = dual_annealing(_transfer_rp, bounds, args, 100)
+    return result.fun, result.x
+    
+def _find_e_bisection(rp_e, rp_m, rel_inc, rm_vec, vm_vec, soi, GMm, GMe, tol=1e-8, maxiter=100):
+    """二分法寻找匹配转移轨道pe的最小e"""
+    args = (rp_m, rel_inc, rm_vec, vm_vec, soi, GMm, GMe)
+    step = 0
+    x0 = 1
+    x1 = 1.5
+    fx0 = _min_rp_at_e(x0, *args)[0] - rp_e
+    while abs(fx0) > tol and step < maxiter:
+        x2 = (x1 + x0) / 2
+        fx2 = _min_rp_at_e(x2, *args)[0] - rp_e
+        if fx2 * fx0 < 0:
+            x1 = x2
+        else:
+            x0, fx0 = x2, fx2
+        step += 1
+    result = _min_rp_at_e(x0, *args)
+    return x0, *result[1]
+
+def transfer_target(orbit: Orbit, moon: Body, cap_t, rp_m, rel_inc):
+    """向卫星转移的瞄准轨道, 位于捕获临界前
+
+    Args:
+        orbit (Orbit): 航天器轨道
+        moon (Body): 卫星
+        cap_t (Quantity): 捕获瞄准时刻
+        rp_m (Quantity): 停泊轨道瞄准近星点
+        rel_inc (Quantity): 瞄准轨道与卫星轨道面夹角
+
+    Returns:
+        Orbit: 转移瞄准轨道
+    """
+    orb_m = moon.orbit.propagate_to_epoch(cap_t)
+    rm_vec = orb_m.r_vec
+    rp_e = orbit.r_at_nu(orbit.nu_at_direction(-rm_vec)).to_value(u.km)
+    rm_vec = orb_m.r_vec.to_value(u.km / u.s)
+    vm_vec = orb_m.v_vec.to_value(u.km / u.s)
+    rp_m = rp_m.to_value(u.km)
+    GM_e = moon.attractor.k.to_value(u.km ** 3 / u.s ** 2)
+    GM_m = moon.k.to_value(u.km ** 3 / u.s ** 2)
+    soi = moon.soi.to_value(u.km)
+    rel_inc = rel_inc.to_value(u.rad)
+    ref = OrbitalFrame.from_orbit(orb_m)
+    rm_vec = ref.transform_d_from_parent(rm_vec)
+    vm_vec = ref.transform_d_from_parent(vm_vec)
+    e, raan, argp = _find_e_bisection(rp_e, rp_m, rel_inc, rm_vec, vm_vec, soi, GM_m, GM_e)
+    rcap_vec, vcap_vec = _flyby_rv(rp_m, e, rel_inc, raan, argp, soi, GM_m)
+    re_vec = rm_vec + rcap_vec
+    ve_vec = vm_vec + vcap_vec
+    re_vec = ref.transform_d_to_parent(re_vec)
+    ve_vec = ref.transform_d_to_parent(ve_vec)
+    orb_t = Orbit.from_rv(moon.attractor, re_vec * u.km, ve_vec * u.km / u.s, cap_t)
+    return orb_t

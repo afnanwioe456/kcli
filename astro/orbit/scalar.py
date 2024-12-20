@@ -125,7 +125,7 @@ class OrbitBase:
     def period(self):
         if self.e >= 1:
             return np.inf * u.s
-        return period(
+        return T(
             self.a.to_value(u.km),
             self.attractor.k.to_value(u.km ** 3 / u.s ** 2)
             ) * u.s
@@ -161,6 +161,16 @@ class OrbitBase:
             self.attractor.k.to_value(u.km ** 3 / u.s ** 2)
         ) * u.km
 
+    @u.quantity_input(r_vec=u.km)
+    def nu_at_direction(self, r_vec):
+        from ..frame import PQWFrame
+        r_vec = r_vec.to_value(u.km)
+        r_vec = PQWFrame.from_orbit(self).transform_d_from_parent(r_vec)
+        nu = np.arctan2(r_vec[1], r_vec[0])  # arctan象限不清
+        if nu < 0:
+            nu += 2 * np.pi
+        return nu * u.rad
+
     @cached_property
     def rp(self):
         return self.r_at_nu(0 * u.rad)
@@ -183,16 +193,6 @@ class OrbitBase:
         rp = self.r_at_nu(nu)
         limit = self.attractor.r + self.attractor.atomsphere_height
         return rp > limit
-
-    @u.quantity_input(nu=u.rad)
-    def is_safe_before(self, nu):
-        nu = self._correct_coe(nu)
-        if nu < self.nu:
-            return self.is_safe()
-        c = pi * u.rad
-        nu_ = min((2*c-nu) if nu > c else nu, 
-                  (2*c-self.nu) if self.nu > c else self.nu)
-        return self.is_safe(nu_)
 
     def _to_rv(self):
         if self._has_rv_state():

@@ -2,7 +2,7 @@ import numpy as np
 from functools import cached_property
 from astropy import units as u
 
-from ..utils import UTIL_CONN
+from .utils import UTIL_CONN
 
 class Body:
     def __init__(self,

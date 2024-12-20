@@ -64,7 +64,7 @@ def opt_lambert_by_grid_search(orbit_v: Orbit,
         trans_l = max(best_tt - trans_step, trans_l)
         trans_r = min(best_tt + trans_step, trans_r)
         resolution = max(5, resolution / 5)
-    best_lam.change_orbit(orbit_v)
+    best_lam = best_lam.change_orbit(orbit_v)
     return best_lam
 
 def opt_lambert_revolution(orbit_v, orbit_t, safe_check=True):

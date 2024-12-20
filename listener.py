@@ -45,10 +45,14 @@ class Listener:
         if command is None:
             return
         # 收到终止指令，向其他线程传递指令
-        if is_stop_sign(command):
+        if self.is_stop_sign(command):
             self._msg_queue.put(message)
         self._msg_queue.task_done()
         return command
+
+    @staticmethod
+    def is_stop_sign(command: Command):
+        return command.msg.user_id == str(ROOT) and command.msg.chat_text == '!stop'
 
     async def _listen_task(self):
         self._init_session()
@@ -110,10 +114,6 @@ class ListenerHandler(BaseHandler):
         print(f'醒目留言 ¥{message.price} {message.uname}：{message.message}')
 
 
-def is_stop_sign(command: Command):
-    return command.msg.user_id == str(ROOT) and command.msg.chat_text == '!stop'
-
-
 if __name__ == '__main__':
     from concurrent.futures import ThreadPoolExecutor
     from time import sleep
@@ -128,7 +128,7 @@ if __name__ == '__main__':
                 if command is None:
                     sleep(3)
                     continue
-                if is_stop_sign(command):
+                if Listener.is_stop_sign(command):
                     asyncio.run(listener._stop())
                     sleep(3)
                     break

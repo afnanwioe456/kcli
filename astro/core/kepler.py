@@ -31,9 +31,14 @@ def v2r(v, a, GM, e):
     return 2 * GM / (v ** 2 + GM / a)
 
 @njit
-def period(a, GM):
+def T(a, GM):
     """椭圆轨道的周期"""
     return 2 * pi * a ** 1.5 / GM ** 0.5
+
+@njit
+def T2v(T, r, GM):
+    a = (T * sqrt(GM) / (2 * pi)) ** (2 / 3)
+    return r2v(r, a, GM, 0)
 
 @njit
 def nu2E(nu, e):
@@ -179,6 +184,14 @@ def rv2coe(r_vec, v_vec, GM):
     if vr < 0:
         nu = 2 * pi - nu
     return h, e, inc, raan, argp, nu
+
+@njit
+def rv2he(r_vec, v_vec, GM):
+    r = norm(r_vec)
+    v = norm(v_vec)
+    h_vec = cross(r_vec, v_vec)
+    e_vec = ((v ** 2 - GM / r) * r_vec - dot(r_vec, v_vec) * v_vec) / GM
+    return norm(h_vec), norm(e_vec)
         
 @njit
 def coe2rv(h, e, inc, raan, argp, nu, GM):

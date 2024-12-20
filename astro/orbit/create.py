@@ -71,6 +71,8 @@ class Orbit(OrbitBase):
         Returns:
             Orbit: 传播后的轨道
         """
+        if M != 0:
+            prograde = True
         orb = Orbit.from_coe(self.attractor, self.a, self.e, self.inc, 
                              self.raan, self.argp, nu, self.epoch)
         dt = orb.delta_t - self.delta_t
@@ -90,6 +92,20 @@ class Orbit(OrbitBase):
             sign
         ) * u.rad
         return self.propagate_to_nu(nu)
+
+    @u.quantity_input(nu=u.s)
+    def is_safe_before(self, epoch):
+        if epoch < self.epoch:
+            raise ValueError(f'epoch {epoch} is smaller than orbit epoch {self.epoch}')
+        if epoch >= self.period:
+            return self.is_safe()
+        orb = self.propagate_to_epoch(epoch)
+        if orb.nu <= self.nu:
+            return self.is_safe()
+        p = np.pi * u.rad
+        if (abs(p - orb.nu) < abs(p - self.nu)):
+            return self.is_safe(self.nu)
+        return self.is_safe(orb.nu)
 
     @staticmethod
     @u.quantity_input(
