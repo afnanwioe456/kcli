@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
-from scipy.optimize import dual_annealing, differential_evolution
+from scipy.optimize import dual_annealing, root_scalar
 from numba import njit
 from astropy import units as u
 
@@ -174,10 +174,7 @@ def _call_transfer_rp_raan_argp(paras, *args):
 def _min_rp_at_e(e, rp_m, inc, rm_vec, vm_vec, soi, GMm, GMe):
     """给定捕获轨道e, 寻找最小转移轨道pe"""
     args = (e, rp_m, inc, rm_vec, vm_vec, soi, GMm, GMe)
-    if inc < np.pi / 2:
-        bounds = [(np.pi, 2 * np.pi), (0, 2 * np.pi)]
-    else:
-        bounds = [(0, np.pi), (0, 2 * np.pi)]
+    bounds = [(0, np.pi), (0, 2 * np.pi)]
     result = dual_annealing(_call_transfer_rp_raan_argp, bounds, args, 10)
     return result.fun, result.x
     
@@ -203,6 +200,15 @@ def _find_e_bisection(rp_e, rp_m, inc, rm_vec, vm_vec, soi, GMm, GMe, tol=1e-8, 
             x0, fx0, rp0 = x2, fx2, rp2
         step += 1
     return x0, *fx0[1]
+
+def _rp_diff_at_e(e, rp_e, *args):
+    return _min_rp_at_e(e, *args)[0] - rp_e
+
+def _find_e_root(rp_e, *args):
+    solution = root_scalar(_rp_diff_at_e, args=(rp_e, *args), method='brentq', bracket=[1, 1.5])
+    e = solution.root
+    raan, argp = _min_rp_at_e(e, *args)[1]
+    return e, raan, argp
 
 def transfer_target(orbit: Orbit, moon: Body, cap_t, rp_m, inc, relative=True):
     """向卫星转移的瞄准轨道, 位于捕获临界前
@@ -232,7 +238,7 @@ def transfer_target(orbit: Orbit, moon: Body, cap_t, rp_m, inc, relative=True):
         ref = OrbitalFrame.from_orbit(orb_m)
         rm_vec = ref.transform_d_from_parent(rm_vec)
         vm_vec = ref.transform_d_from_parent(vm_vec)
-    e, raan, argp = _find_e_bisection(rp_e, rp_m, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
+    e, raan, argp = _find_e_root(rp_e, rp_m, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
     rcap_vec, vcap_vec = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
     re_vec = rm_vec + rcap_vec
     ve_vec = vm_vec + vcap_vec
@@ -283,6 +289,15 @@ def _find_e_orbit_bisection(rp_e, *args, tol=1e-8, maxiter=35):
         step += 1
     return x0, *fx0[1]
 
+def _rp_diff_at_e_orbit(e, rp_e, *args):
+    return _min_rp_at_e_orbit(e, *args)[0] - rp_e
+
+def _find_e_orbit_root(rp_e, *args):
+    solution = root_scalar(_rp_diff_at_e_orbit, args=(rp_e, *args), method='brentq', bracket=[1, 1.5])
+    e = solution.root
+    delta_t, argp = _min_rp_at_e_orbit(e, *args)[1]
+    return e, delta_t, argp
+
 def transfer_orbit_target(orb_v: Orbit, orb_t: Orbit, cap_t, timed=False):
     """向卫星目标轨道转移的瞄准轨道, 位于捕获临界前
 
@@ -308,7 +323,7 @@ def transfer_orbit_target(orb_v: Orbit, orb_t: Orbit, cap_t, timed=False):
     raan = orb_t.raan.to_value(u.rad)
     inc = orb_t.inc.to_value(u.rad)
     args = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
-    e, delta_t, argp = _find_e_orbit_bisection(rp_e, *args)
+    e, delta_t, argp = _find_e_orbit_root(rp_e, *args)
     rcap_vec, vcap_vec = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
     orb_m = orb_m.propagate(delta_t * u.s)
     re_vec = orb_m.r_vec + rcap_vec * u.km

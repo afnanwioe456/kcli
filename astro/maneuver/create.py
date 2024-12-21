@@ -168,8 +168,8 @@ class Maneuver:
         """
         dt = revisit_epoch - orb.epoch
         M = dt // orb.period
-        if M >= 20:  # 周期数过多可能导致机动过小
-            revisit_epoch = orb.epoch + 20 * orb.period + dt % orb.period
+        if M >= 50:  # 周期数过多可能导致机动过小
+            revisit_epoch = orb.epoch + 50 * orb.period + dt % orb.period
             conserved = True
         mnvs: list[Maneuver] = []
         inner_imps = change_phase_planner(orb, revisit_epoch, True, conserved)

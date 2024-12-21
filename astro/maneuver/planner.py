@@ -58,25 +58,21 @@ def match_plane_planner(orb_v: Orbit, orb_t: Orbit, closest: bool = False, conse
     theta = angle_between_vectors(hv_vec, ht_vec)
     if theta < 1e-3:
         return []
-    lon = np.cross(hv_vec, ht_vec)
-    ref_v = PQWFrame.from_orbit(orb_v)
-    ref_t = PQWFrame.from_orbit(orb_t)
-    lon_v = ref_v.transform_d_from_parent(lon)
-    lon_t = ref_t.transform_d_from_parent(lon)
-    nu_v = np.arctan2(lon_v[1], lon_v[0]) * u.rad
-    nu_t = np.arctan2(lon_t[1], lon_t[0]) * u.rad
+    lon = np.cross(hv_vec, ht_vec) * u.km
+    nu_v = orb_v.nu_at_direction(lon)
+    nu_t = orb_t.nu_at_direction(lon)
     pi_rad = np.pi * u.rad
     if closest:
         delta_nu = nu_v - orb_v.nu
         if delta_nu > pi_rad or delta_nu < -pi_rad:
-            nu_v = 2 * pi_rad - nu_v
-            nu_t = 2 * pi_rad - nu_t
+            nu_v += pi_rad
+            nu_t += pi_rad
     else:
         r1 = orb_v.r_at_nu(nu_v)
         r2 = orb_v.r_at_nu(2 * pi_rad - nu_v)
         if r1 < r2:
-            nu_v = 2 * pi_rad - nu_v
-            nu_t = 2 * pi_rad - nu_t
+            nu_v += pi_rad
+            nu_t += pi_rad
     orb_mnv_v = orb_v.propagate_to_nu(nu_v, prograde=True)
     orb_mnv_t = orb_t.propagate_to_nu(nu_t)
     vtv = orb_mnv_v.vt
