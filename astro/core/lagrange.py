@@ -1,4 +1,4 @@
-from numpy import cos, sin, sqrt, dot, cross
+from numpy import cos, sin, sqrt, dot, cross, pi
 from numpy.linalg import norm
 from numba import njit
 from astropy import units as u
@@ -20,16 +20,19 @@ def rv2rv_delta_nu(r_vec, v_vec, delta_nu, GM):
     return:
         r_vec, v_vec (ndarray[float]): Δ真近点角处的rv矢量, km/s
     """
+    raise NotImplementedError()
+    if delta_nu % (2 * pi) == 0.:
+        return r_vec, v_vec
     h_vec = cross(r_vec, v_vec)
     h = norm(h_vec)
-    r = norm(r_vec)
-    vr = dot(v_vec, r_vec) / r
-    r = h ** 2 / GM / (1 + (h ** 2 / (GM * r) - 1) * cos(delta_nu) - (h * vr / GM * sin(delta_nu)))
+    r0 = norm(r_vec)
+    vr0 = dot(v_vec, r_vec) / r0
+    r1 = h ** 2 / GM / (1 + (h ** 2 / (GM * r0) - 1) * cos(delta_nu) - (h * vr0 / GM * sin(delta_nu)))
     c = GM / h ** 2 * (1 - cos(delta_nu))
-    f = 1 - r * c
-    df = (GM / h) * ((1 - cos(delta_nu)) / sin(delta_nu)) * (c - (1 / r) - (1 / r))
-    g = r * r * sin(delta_nu) / h
-    dg = 1 - r * c
+    f = 1 - r1 * c
+    df = (c * h / sin(delta_nu)) * (c - (1 / r0) - (1 / r1))
+    g = r1 * r0 * sin(delta_nu) / h
+    dg = 1 - r0 * c
     r_vec = f * r_vec + g * v_vec
     v_vec = df * r_vec + dg * v_vec
     return r_vec, v_vec

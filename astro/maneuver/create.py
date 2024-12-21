@@ -32,8 +32,8 @@ class Maneuver:
         s = ''
         for i in range(len(self._impulses)):
             s += (f'Impulse {i}: {round(self._impulses[i][0].to_value(u.s), 2)} s, '
-                  f'{np.round(self._impulses[i][1].to_value(u.km / u.s), 2)} km/s\n')
-        s += f'Total Δv: {round(self.get_total_cost().to_value(u.km / u.s), 2)} km/s'
+                  f'{np.round(self._impulses[i][1].to_value(u.km / u.s), 3)} km/s\n')
+        s += f'Total Δv: {round(self.get_total_cost().to_value(u.km / u.s), 3)} km/s'
         return s
 
     @property
@@ -168,8 +168,8 @@ class Maneuver:
         """
         dt = revisit_epoch - orb.epoch
         M = dt // orb.period
-        if M >= 10:  # 周期数过多可能导致机动过小
-            revisit_epoch = orb.epoch + 10 * orb.period + dt % orb.period
+        if M >= 20:  # 周期数过多可能导致机动过小
+            revisit_epoch = orb.epoch + 20 * orb.period + dt % orb.period
             conserved = True
         mnvs: list[Maneuver] = []
         inner_imps = change_phase_planner(orb, revisit_epoch, True, conserved)
@@ -238,8 +238,8 @@ class Maneuver:
                              moon: Body, 
                              cap_t: u.Quantity, 
                              pe: u.Quantity = 100 * u.km,
-                             rel_inc: u.Quantity = 0 * u.rad,
-                             radial: bool = False):
+                             inc: u.Quantity = 0 * u.rad,
+                             relative: bool = True):
         """卫星转移瞄准轨道
 
         Args:
@@ -247,22 +247,39 @@ class Maneuver:
             moon (Body): 卫星
             cap_t (u.Quantity): 捕获时刻
             pe (u.Quantity, optional): 捕获轨道的近星点高度. Defaults to 100*u.km.
-            rel_inc (u.Quantity, optional): 捕获轨道与卫星轨道的相对倾角. Defaults to 0*u.rad.
-            radial (bool, optional): 径向捕获. Defaults to False.
+            inc (u.Quantity, optional): 捕获轨道倾角. Defaults to 0*u.rad.
+            relative (bool, optional): 使用相对倾角. Defaults to True.
 
         Returns:
             Orbit: 转移瞄准轨道
         """
         rp_m = pe + moon.r
-        if radial:
-            orb_target = transfer_target_radial(orb_v, moon, cap_t, rp_m, rel_inc)
-        else:
-            orb_target = transfer_target(orb_v, moon, cap_t, rp_m, rel_inc)
+        orb_target = transfer_target(orb_v, moon, cap_t, rp_m, inc, relative)
         orb_transfer = orb_target.propagate_to_nu(0*u.rad, True, -1)
         if orb_transfer.epoch < orb_v.epoch:
             cap_t += orb_v.epoch - orb_transfer.epoch + 600 * u.s
             warnings.warn(f'orbit already passed transfer window, trying capture time {cap_t}', RuntimeWarning)
-            return cls.moon_transfer_target(orb_v, moon, cap_t, pe, rel_inc, radial)
+            return cls.moon_transfer_target(orb_v, moon, cap_t, pe, inc, relative)
+        return orb_target
+
+    @classmethod
+    def moon_orbit_transfer_target(cls, orb_v: Orbit, orb_t: Orbit, cap_t):
+        """向卫星目标轨道转移的瞄准轨道, 位于捕获临界前
+
+        Args:
+            orb_v (Orbit): 航天器轨道
+            orb_t (Orbit): 目标轨道
+            cap_t (Quantity): 瞄准捕获时间
+
+        Returns:
+            Orbit: 瞄准轨道
+        """
+        orb_target = transfer_orbit_target(orb_v, orb_t, cap_t)
+        orb_transfer = orb_target.propagate_to_nu(0*u.rad, True, -1)
+        if orb_transfer.epoch < orb_v.epoch:
+            cap_t += orb_v.epoch - orb_transfer.epoch + 600 * u.s
+            warnings.warn(f'orbit already passed transfer window, trying capture time {cap_t}', RuntimeWarning)
+            return cls.moon_orbit_transfer_target(orb_v, orb_t, cap_t)
         return orb_target
 
     @classmethod
@@ -276,16 +293,7 @@ class Maneuver:
         Returns:
             Maneuver: 转移机动
         """
-        # if radial:
-        #     orb_transfer = transfer_start_radial(moon, orb_t, orb_v)
-        #     orbit_start = orb_v.propagate_to_epoch(orb_transfer.epoch)
-        #     t = orb_transfer.epoch - orb_v.epoch
-        #     dv_vec = orb_transfer.v_vec - orbit_start.v_vec
-        #     mnv = Maneuver([(t, dv_vec)], orb_v)
-        #     return mnv, orb_t
-        # 如果使用非径向转移,
-        # 那么必须先匹配轨道倾角
-        # 再进行一次调相机动进入转移窗口
+        # 先匹配轨道倾角, 再进行一次调相机动进入转移窗口
         orb_transfer = orb_t.propagate_to_nu(0*u.rad, True, -1)
         mnv_coplanar = Maneuver.match_plane(orb_v, orb_transfer, True, True)
         orb_coplanar = mnv_coplanar.apply()
@@ -294,7 +302,7 @@ class Maneuver:
         mnv_phase = Maneuver.change_phase(orb_coplanar, orb_transfer.epoch, True, True, False)
         orb_start = mnv_phase.apply()
         orb_start = orb_start.propagate_to_epoch(orb_transfer.epoch)
-        mnv_transfer = Maneuver([(0 * u.s, orb_transfer.v_vec - orb_start.v_vec)], orb_start)
+        mnv_transfer = Maneuver.lambert(orb_start, orb_t.propagate(-5 * u.min))
         mnv_series = mnv_coplanar.merge(mnv_phase).merge(mnv_transfer)
         return mnv_series
 
