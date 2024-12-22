@@ -212,20 +212,27 @@ class Orbit(OrbitBase):
             ut * u.s,
         )
 
-    def launch_window(self, site_p, direction='SE', phase_diff=40, start_period=0, end_period=30):
-        """返回发射场向轨道发射的最佳ut
+    def launch_window(self, 
+                      site_p: np.ndarray, 
+                      direction: str = 'SE', 
+                      cloest: bool = False, 
+                      min_phase: float = 40, 
+                      start_period: int = 0, 
+                      end_period: int = 30):
+        """发射场向轨道发射的时刻
 
         Args:
             site_p (ndarray): 发射场位置矢量, 惯性系
-            direction (str): 发射方向SE/NE/[Default]. Defaults to 'SE'.
-            phase_diff (int, optional): 最小相位差. Defaults to 40.
+            direction (str): 发射方向. Defaults to 'SE'.
+            cloest (bool): 返回最近的窗口. Defaults to False.
+            min_phase (int, optional): 最小相位差. Defaults to 40.
             start_period (int, optional): 开始周期. Defaults to 0.
             end_period (int, optional): 结束周期. Defaults to 30.
 
         Returns:
             float: 发射窗口
         """
-        ut: float = orbit_launch_window(self, np.array(site_p), direction, phase_diff, start_period, end_period)
+        ut: float = orbit_launch_window(self, site_p, direction, cloest, min_phase, start_period, end_period)
         return ut
 
     def cheat(self, ut=None):

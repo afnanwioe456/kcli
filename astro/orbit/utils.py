@@ -5,13 +5,18 @@ from astropy import units as u
 from typing import TYPE_CHECKING
 
 from ..core.linear import angle_between_vectors
-from ..utils import sec_to_date
 
 if TYPE_CHECKING:
     from .create import Orbit
 
 
-def orbit_launch_window(orbit: Orbit, site_position: np.ndarray, direction='SE', phase_diff=40, start_period=0, end_period=30):
+def orbit_launch_window(orbit: Orbit, 
+                        site_position: np.ndarray, 
+                        direction = 'SE', 
+                        cloest = False,
+                        min_phase = 40, 
+                        start_period = 0, 
+                        end_period = 30):
     """
     发射到target轨道面的发射窗口
     """
@@ -47,22 +52,25 @@ def orbit_launch_window(orbit: Orbit, site_position: np.ndarray, direction='SE',
             phase_difference = 2 * np.pi - phase_difference
         time_difference = phase_difference * period / (2 * np.pi)
         result_launch_window.append(time_difference)
+    if cloest == True:
+        return min(result_launch_window) * u.s + orbit.epoch
 
     # 计算最佳发射窗口
-    best_phase_angle = 180
+    best_phase_angle = np.inf
     best_launch_window = result_launch_window[0]
     for i in list(range(len(result_launch_window))):
         launch_window = result_launch_window[i] + start_period * period
         launch_window_position = np.array([float(result_value[i][0]), float(result_value[i][1]), z])
         for _ in range(start_period, end_period):
-            target_position = orbit.propagate(launch_window).r_vec.to_value(u.km)
+            target_position = orbit.propagate_to_epoch(launch_window * u.s).r_vec.to_value(u.km)
             phase_angle = np.degrees(angle_between_vectors(launch_window_position, target_position))
             direction = np.cross(target_position, target_position - launch_window_position) / orbit_plane_normal > 0
             if not direction.all():
                 phase_angle = -phase_angle
-            if phase_diff < phase_angle < best_phase_angle:
+            if min_phase < phase_angle < best_phase_angle:
                 best_phase_angle = phase_angle
                 best_launch_window = launch_window
+            print(_, phase_angle)
             launch_window += period
 
-    return best_launch_window + orbit.epoch
+    return best_launch_window * u.s + orbit.epoch
