@@ -235,7 +235,6 @@ class ShortCommand(Command):
 
 
 def _rocket_help():
-    print(LINE_SEP)
     print('这是一条临时rocket帮助，维护中...')
     print('+ 可用运载火箭：\n'
           '-r soyuz2        联盟2号\n'

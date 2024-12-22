@@ -28,13 +28,13 @@ IMPORTANCE:
 
 
 class Task:
-    conn: Client | None
+    conn: Client
     event_list: list[krpcEvent]
 
     def __init__(self,
                  name: str,
                  tasks: Tasks,
-                 start_time: int,
+                 start_time: float,
                  duration: int,
                  importance: int = 3,
                  ):

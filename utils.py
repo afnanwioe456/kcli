@@ -9,9 +9,8 @@ import krpc.services
 
 from .repository import *
 
-LINE_SEP = '-----------------------------------------------------'
 KSP_EPOCH_TIME = -599616000
-LAUNCH_SITES = {
+LAUNCH_SITES_COORDS = {
     'wenchang': (19.613726150307052, 110.9553275138089)
 }
 
@@ -123,7 +122,7 @@ def sec_to_date(seconds) -> datetime:
 ### LAUNCH_SITE ###
 
 def get_launch_site_position(site: str = 'wenchang'):
-    la, lo = LAUNCH_SITES[site]
+    la, lo = LAUNCH_SITES_COORDS[site]
     body = UTIL_CONN.space_center.bodies['Earth']
     site_p = body.surface_position(la, lo, body.non_rotating_reference_frame)
     site_p = (site_p[0], site_p[2], site_p[1])

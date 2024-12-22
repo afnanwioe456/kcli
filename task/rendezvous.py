@@ -2,10 +2,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .tasks import Task
-from .maneuver import SimpleMnv
+from .maneuver import ExecuteNode
 from ..astro.orbit import Orbit
-from ..astro.maneuver import Maneuver as MnvPlanner
-from ..utils import sec_to_date, switch_to_vessel, get_vessel_by_name, LOGGER, logging_around
+from ..astro.maneuver import Maneuver
+from ..utils import sec_to_date, switch_to_vessel, get_vessel_by_name, logging_around
 
 if TYPE_CHECKING:
     from .tasks import Tasks
@@ -43,13 +43,11 @@ class Rendezvous(Task):
         v = get_vessel_by_name(self.name)
         ss_orb = Orbit.from_krpcv(self.spacestation.vessel)
         v_orb = Orbit.from_krpcv(v)
-        mnv = MnvPlanner.bi_impulse(v_orb, ss_orb)
+        mnv = Maneuver.opt_bi_impulse_rdv(v_orb, ss_orb)
         nodes = mnv.to_krpcv(v)
         next_task: list[Task] = []
         for n in nodes:
-            start_time = n.ut - 600
-            task = SimpleMnv(self.name, self.tasks, 'node', start_time=start_time)
-            task.importance = 8
+            task = ExecuteNode.from_node(self.vessel, n, self.tasks, 8)
             next_task.append(task)
         self.tasks.submit_nowait(next_task)
         
