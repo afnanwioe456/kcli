@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
 from time import sleep
-
+from krpc.services.spacecenter import SASMode
 from .utils import *
 
 if TYPE_CHECKING:
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.1):
-    sc = AUTOPILOT_CONN.space_center
+    sc = UTIL_CONN.space_center
     set_point = distance
     a_limit = -vessel.available_rcs_force[1][1] / vessel.mass * 0.8
     # TODO: rcs_force没有考虑limit设置，只是单纯的最大值
@@ -23,6 +23,8 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
     prev_time = sc.ut
     stable = 0
 
+    vessel.control.sas_mode = SASMode.target
+    vessel.control.sas = True
     while True:
         sleep(rate)
         cur_time = sc.ut
@@ -42,7 +44,6 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
         direction = sc.transform_direction(tuple(dv), ref_v_orb, ref_v)
         direction = np.array(direction)
         control = -pid_d.compute(np.zeros(3), direction, dt)
-        print(s_target, control)
         vessel.control.right = control[0]
         vessel.control.forward = control[1]
         vessel.control.up = -control[2]
@@ -52,4 +53,5 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
             stable += 1
         else:
             stable = 0
+    vessel.control.sas = False
             

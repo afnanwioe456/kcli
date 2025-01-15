@@ -79,7 +79,7 @@ def get_ut():
 def time_wrap(start_time):
     ut = UTIL_CONN.space_center.ut
     if ut < start_time:
-        print(f'time wrapping to {sec_to_date(start_time)} ...')
+        LOGGER.debug(f'time wrapping to {sec_to_date(start_time)} ...')
         UTIL_CONN.space_center.warp_to(start_time)
 
 

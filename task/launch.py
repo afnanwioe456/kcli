@@ -97,14 +97,14 @@ class Launch(Task):
         self.autopilot.turn_roll = 90
         self.autopilot.autostage = self.autostage
         self.autopilot.enabled = True
-        LOGGER.debug(f'"{self.name}": autopilot engaged')
+        LOGGER.debug(f'{self.name}: autopilot engaged')
 
     def _roll_out(self):  # 推出火箭
         with krpc.connect(name=self.rocket_name + ' roll out') as conn:
             sc = conn.space_center
             if sc is None:
                 return
-            LOGGER.debug(f'"{self.name}": rolling out...')
+            LOGGER.debug(f'{self.name}: rolling out...')
             sc.launch_vessel('VAB', self.rocket_name + self.payload_name, 'LaunchPad', True, [])
 
     @logging_around

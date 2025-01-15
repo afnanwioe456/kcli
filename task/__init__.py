@@ -14,7 +14,7 @@ __all__ = [
     'LAUNCH_ROCKET_DIC',
     'LAUNCH_PAYLOAD_DIC',
     'SimpleMnvPlan',
-    'NodeExecute'
+    'ExecuteNode',
     'ReleasePayload',
     'Rendezvous',
     'Docking',

@@ -38,7 +38,7 @@ class Rendezvous(Task):
 
     @logging_around
     def start(self):
-        if not self._conn_setup:
+        if not self._conn_setup():
             return
         v = get_vessel_by_name(self.name)
         ss_orb = Orbit.from_krpcv(self.spacestation.vessel)

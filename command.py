@@ -151,9 +151,16 @@ class Command:
         self.start_time = start_sec if start_sec else -1
 
         self.tasks = Tasks(self.msg, self.count, task_queue)
-        self.tasks.submit(executor(tasks=self.tasks, name=self.name, rocket_name=executor.rocket_name,
-                                   payload_name=self.payload, ap_altitude=self.ap, pe_altitude=self.pe,
-                                   inclination=self.inc, start_time=self.start_time))
+        self.tasks.submit(executor(
+            tasks=self.tasks, 
+            name=self.name, 
+            rocket_name=executor.rocket_name,
+            payload_name=self.payload, 
+            ap_altitude=self.ap, 
+            pe_altitude=self.pe,
+            inclination=self.inc, 
+            start_time=self.start_time,
+            importance=self.priority))
         return self.tasks
 
     def _spacestation_command_process(self, command_args, task_queue) -> Tasks | None:
@@ -184,13 +191,11 @@ class Command:
         self.tasks = Tasks(self.msg, self.count, task_queue)
         spacestation: Spacestation = SPACESTATION_DIC[command_args[0][1:]]
 
-        task = None
         if args.supply:
-            task = spacestation.supply_mission(self.tasks)
+            spacestation.supply_mission(self.tasks)
+            return self.tasks
         elif args.crew:
-            task = spacestation.crew_mission(self.tasks)
-        if task:
-            self.tasks.submit(task)
+            spacestation.crew_mission(self.tasks)
             return self.tasks
 
 

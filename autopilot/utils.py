@@ -1,7 +1,6 @@
 import numpy as np
 import krpc
-
-AUTOPILOT_CONN = krpc.connect('autopilot')
+from ..utils import UTIL_CONN
 
 
 class PIDController:

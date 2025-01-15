@@ -1,5 +1,6 @@
 from __future__ import annotations
 import numpy as np
+from astropy import units as u
 
 from .utils import *
 from .astro.orbit import Orbit
@@ -17,9 +18,6 @@ class Spacestation:
         self.control = self.vessel.control
         self.autopilot = self.vessel.auto_pilot
 
-    def resource_calculater(self):
-        pass
-
     @property
     def supply_docking_ports(self):
         available_ports = []
@@ -35,16 +33,6 @@ class Spacestation:
             if 'crew' in p.part.tag and not p.docked_part:
                 available_ports.append(p)
         return available_ports
-
-    def attitude_adjustment(self):
-        switch_to_vessel(self.name)
-        self.control.rcs = True
-        self.autopilot.sas = True
-        self.autopilot.sas_mode = UTIL_CONN.space_center.SASMode.prograde
-        self.autopilot.target_roll = 0
-        self.autopilot.engage()
-        self.autopilot.wait()
-        self.control.rcs = False
 
     @logging_around
     def supply_mission(self, tasks: Tasks) -> list[Task] | None:
@@ -66,12 +54,13 @@ class Kerbal_Space_Station(Spacestation):
         super().__init__('KSS')
 
     @logging_around
-    def crew_mission(self, tasks: Tasks) -> list[Task]: 
+    def crew_mission(self, tasks: Tasks): 
         # TODO: 撤离空间站
         self.crew_mission_count += 1
         site_p = get_launch_site_position()
         orb = Orbit.from_krpcv(self.vessel)
-        launch_window = Orbit.launch_window(orb, site_p, 'SE', self.launch_phase_diff)
+        launch_window = Orbit.launch_window(orb, site_p, 'SE', min_phase=self.launch_phase_diff)
+        launch_window = launch_window.to_value(u.s)
         inc = -np.degrees(self.vessel.orbit.inclination)
 
         spacecraft_name = f'{self.name} crew mission {self.crew_mission_count}'
@@ -87,8 +76,8 @@ class Kerbal_Space_Station(Spacestation):
                                    start_time=launch_window - self.launch_lead_time)
         rdv_task = Rendezvous(spacecraft_name, self, tasks)
         dock_task = Docking(spacecraft_name, self, tasks)
-
-        return [launch_task, rdv_task, dock_task]
+        tasks.submit_nowait([launch_task, rdv_task, dock_task])
+        return tasks
 
 
 KSS = Kerbal_Space_Station()

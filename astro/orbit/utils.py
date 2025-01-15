@@ -70,7 +70,6 @@ def orbit_launch_window(orbit: Orbit,
             if min_phase < phase_angle < best_phase_angle:
                 best_phase_angle = phase_angle
                 best_launch_window = launch_window
-            print(_, phase_angle)
             launch_window += period
 
     return best_launch_window * u.s + orbit.epoch

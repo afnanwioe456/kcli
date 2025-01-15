@@ -79,7 +79,6 @@ class Task:
     def _activate_next_stage(self) -> list[Vessel]:
         jettisoned_vessel_list = self.vessel.control.activate_next_stage()
         self.stage = self.vessel.control.current_stage
-        print(f"{self.vessel.name}: S{self.stage}")
         return jettisoned_vessel_list
 
     def _act_part_list_by_type(self,
@@ -155,7 +154,7 @@ class Tasks:
             task = [task]
         self.task_list += task
 
-        log = (f"Tasks [{self.id}] {self.msg.user_name} added {len(task)} new Task(s):\n"
+        log = (f"Tasks [{self.id}] added {len(task)} new Task(s):\n"
                f"{task[0].short_description}")
         LOGGER.debug(log)
 
@@ -164,7 +163,7 @@ class Tasks:
             task = [task]
         self.task_list = task + self.task_list
 
-        log = (f"Tasks [{self.id}] {self.msg.user_name} added {len(task)} new Task(s):\n"
+        log = (f"Tasks [{self.id}] added {len(task)} new Task(s):\n"
                f"{task[0].short_description}")
         LOGGER.debug(log)
 
