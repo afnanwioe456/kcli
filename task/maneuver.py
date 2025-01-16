@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from krpc.services.spacecenter import Vessel, Node
 
 
-class SimpleMnvPlan(Task):
+class SimpleMnv(Task):
     def __init__(self,
                  name: str,
                  tasks: Tasks,
@@ -20,9 +20,10 @@ class SimpleMnvPlan(Task):
                  target: u.Quantity,
                  start_time: float = -1,
                  duration: int = 300,
+                 tol: float = 0.1,
                  importance: int = 3,
                  ):
-        """规划一次简单的轨道机动
+        """进行一次简单的轨道机动
 
         Args:
             name (str): 载具名
@@ -35,6 +36,7 @@ class SimpleMnvPlan(Task):
         super().__init__(name, tasks, start_time, duration, importance)
         self.mode = mode
         self.target = target
+        self.tol = tol
 
     @property
     def description(self):
@@ -71,15 +73,22 @@ class SimpleMnvPlan(Task):
         nodes = mnv.to_krpcv(self.vessel)
         task_list = []
         for n in nodes:
-            task_list.append(ExecuteNode.from_node(self.vessel, n, self.tasks))
+            task_list.append(ExecuteNode.from_node(self.vessel, n, self.tasks, tol=self.tol))
         self.tasks.submit_nowait(task_list)
         self.conn.close()
 
 
 class ExecuteNode(Task):
-    def __init__(self, name, tasks, start_time, duration, importance = 7):
+    def __init__(self, 
+                 name: str, 
+                 tasks: Tasks, 
+                 start_time: float, 
+                 duration: int, 
+                 tol: float = 0.1, 
+                 importance: int = 7):
         """执行最近的一个节点"""
         super().__init__(name, tasks, start_time, duration, importance)
+        self.tol = tol
 
     @property
     def description(self):
@@ -100,14 +109,14 @@ class ExecuteNode(Task):
         self.vessel.control.rcs = True
         self.executor = self.mj.node_executor
         self.executor.autowarp = True
-        self.executor.tolerance = 0.1
+        self.executor.tolerance = self.tol
         self.executor.execute_one_node()
         while not self.tasks.abort_flag and self.executor.enabled:
             sleep(5)
         self.conn.close()
 
     @staticmethod
-    def from_node(vessel: Vessel, node: Node, tasks: Tasks, importance=7):
+    def from_node(vessel: Vessel, node: Node, tasks: Tasks, tol=0.1, importance=7):
         """执行节点"""
         # TODO: duration
-        return ExecuteNode(vessel.name, tasks, node.ut, 1800, importance)
+        return ExecuteNode(vessel.name, tasks, node.ut, 1800, tol, importance)

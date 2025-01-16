@@ -193,7 +193,7 @@ def get_vessel_by_name(name):
     for v in vessels:
         if v.name == name:
             return v
-    print(f'{name}: 载具不存在!')
+    LOGGER.debug(f'{name}: 载具不存在!')
 
 ### ABORT ###
 

@@ -1,6 +1,6 @@
 from .launch import (Launch, Soyuz2Launch, LongMarch7Launch,
                      LAUNCH_ROCKET_DIC, LAUNCH_PAYLOAD_DIC)
-from .maneuver import SimpleMnvPlan, ExecuteNode
+from .maneuver import SimpleMnv, ExecuteNode
 from .release_payload import ReleasePayload
 from .rendezvous import Rendezvous
 from .docking import Docking
@@ -13,7 +13,7 @@ __all__ = [
     'LongMarch7Launch',
     'LAUNCH_ROCKET_DIC',
     'LAUNCH_PAYLOAD_DIC',
-    'SimpleMnvPlan',
+    'SimpleMnv',
     'ExecuteNode',
     'ReleasePayload',
     'Rendezvous',

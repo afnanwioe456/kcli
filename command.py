@@ -64,7 +64,7 @@ class Command:
         command_type = command_args[0]
         if command_type[1:] in ['launch', 'la']:
             return self._launch_command_process(command_args, task_queue)
-        elif command_type[1:] in SPACESTATION_NAME_DIC.keys():
+        elif command_type[1:] in SPACESTATION_DIC.keys():
             return self._spacestation_command_process(command_args, task_queue)
         elif command_type == '!n':
             try:
@@ -189,13 +189,15 @@ class Command:
             self.priority = 3
 
         self.tasks = Tasks(self.msg, self.count, task_queue)
-        spacestation: Spacestation = SPACESTATION_DIC[command_args[0][1:]]
+        spacestation: SpaceStation = SPACESTATION_DIC[command_args[0][1:]]
 
         if args.supply:
-            spacestation.supply_mission(self.tasks)
+            task_list = spacestation.supply_mission(self.tasks)
+            self.tasks.submit_nowait(task_list)
             return self.tasks
         elif args.crew:
-            spacestation.crew_mission(self.tasks)
+            task_list = spacestation.crew_mission(self.tasks)
+            self.tasks.submit_nowait(task_list)
             return self.tasks
 
 

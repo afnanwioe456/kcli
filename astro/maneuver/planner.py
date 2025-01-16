@@ -34,7 +34,7 @@ def periapsis_planner(orbit: Orbit, pe: u.Quantity):
     if orbit.e >= 1 * u.one: 
         raise ValueError('Planner "change_periapsis" cannot handle escape orbit, try other planner.')
     ra = orbit.ra
-    rp = pe + orbit.rp
+    rp = pe + orbit.attractor.r
     a = (rp + ra) / 2
     e = (ra - rp) / (ra + rp)
     h = a2h(

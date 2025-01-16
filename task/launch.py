@@ -119,16 +119,16 @@ class Launch(Task):
         self.conn.close()
 
     def _submit_next_task(self):
-        from .maneuver import SimpleMnvPlan
+        from .maneuver import SimpleMnv
         from .release_payload import ReleasePayload
         new_task = []
         payload_release = ReleasePayload(self.name, self.tasks)
         new_task.append(payload_release)
         if self.pe_desired is not None:
-            pe_mnv = SimpleMnvPlan(self.name, self.tasks, 'pe', self.pe_desired)
+            pe_mnv = SimpleMnv(self.name, self.tasks, 'pe', self.pe_desired)
             new_task.append(pe_mnv)
         if self.inc_desired is not None:
-            inc_mnv = SimpleMnvPlan(self.name, self.tasks, 'inc', self.inc_desired)
+            inc_mnv = SimpleMnv(self.name, self.tasks, 'inc', self.inc_desired)
             new_task.append(inc_mnv)
         self.tasks.submit_nowait(new_task)
 
@@ -148,7 +148,7 @@ class Ariane5ECALaunch(Launch):
         super().__init__(tasks, **kwargs)
 
     def _submit_next_task(self):
-        from .maneuver import SimpleMnvPlan
+        from .maneuver import SimpleMnv
         from .release_payload import ReleasePayload
         new_task = []
         p_release_1 = ReleasePayload(self.name, self.tasks, count=2)
@@ -156,10 +156,10 @@ class Ariane5ECALaunch(Launch):
 
         new_task.append(p_release_1)
         if self.pe_desired is not None:
-            pe_mnv = SimpleMnvPlan(self.name, self.tasks, 'pe', self.pe_desired)
+            pe_mnv = SimpleMnv(self.name, self.tasks, 'pe', self.pe_desired)
             new_task.append(pe_mnv)
         if self.inc_desired is not None:
-            inc_mnv = SimpleMnvPlan(self.name, self.tasks, 'inc', self.inc_desired)
+            inc_mnv = SimpleMnv(self.name, self.tasks, 'inc', self.inc_desired)
             new_task.append(inc_mnv)
         new_task.append(p_release_2)
         self.tasks.submit_nowait(new_task)

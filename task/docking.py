@@ -9,23 +9,18 @@ from ..utils import LOGGER, switch_to_vessel, sec_to_date, logging_around
 if TYPE_CHECKING:
     from krpc.client import Client
     from .tasks import Tasks
-    from ..spacecrafts import Spacestation
+    from ..spacecrafts import SpaceStation, DockingPortStatus
 
 
-def docking_with_target(conn: Client, ss: Spacestation):
+def docking_with_target(conn: Client, ss: SpaceStation, docking_port: DockingPortStatus):
     conn.space_center.target_vessel = ss.vessel
     sc = conn.space_center
     mj = conn.mech_jeb
     active = sc.active_vessel
-    sleep(5)
-
     parts = active.parts
-    # TODO: 对接口的选择问题
     parts.controlling = parts.docking_ports[0].part
-    sc.target_docking_port = ss.crew_docking_ports[0]
+    sc.target_docking_port = docking_port.part
 
-    log = f"{conn.space_center.active_vessel.name}: docking with {ss.name}"
-    LOGGER.debug(log)
     docking = mj.docking_autopilot
     docking.enabled = True
 
@@ -36,13 +31,15 @@ def docking_with_target(conn: Client, ss: Spacestation):
 class Docking(Task):
     def __init__(self, 
                  name: str, 
-                 spacestation: Spacestation,
+                 spacestation: SpaceStation,
+                 docking_port: DockingPortStatus,
                  tasks: Tasks, 
                  start_time: int = -1, 
                  duration: int = 1800, 
                  importance: int = 3):
         super().__init__(name, tasks, start_time, duration, importance)
         self.spacestation = spacestation
+        self.docking_port = docking_port
 
     @property
     def description(self):
@@ -58,13 +55,62 @@ class Docking(Task):
     
     @logging_around
     def start(self):
+        if self.docking_port.is_docked():
+            LOGGER.debug(f'{self.spacestation} docking port [{self.docking_port.num}] is docked with {self.docking_port.docked_with},'
+                         f'initializing return task.')
+            self.tasks.submit_nowait(self.docking_port.spacecraft.return_mission(self.docking_port, self.tasks) + [self])
+            return
         if not self._conn_setup():
             return False
         # TODO: 主引擎与RCS控制
         dis = 50
+        self.vessel.control.rcs = True
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} getting closer: {dis}')
         get_closer(dis, self.vessel, self.spacestation.vessel)
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking')
-        docking_with_target(self.conn, self.spacestation)
+        docking_with_target(self.conn, self.spacestation, self.docking_port)
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking completed')
+        self.vessel.control.rcs = False
         self.conn.close()
+
+
+class Undocking(Task):
+    def __init__(self, 
+                 spacestation: SpaceStation,
+                 docking_port: DockingPortStatus,
+                 tasks: Tasks, 
+                 start_time: int = -1, 
+                 duration: int = 1800, 
+                 importance: int = 3):
+        super().__init__(spacestation.name, tasks, start_time, duration, importance)
+        self.spacestation = spacestation
+        self.docking_port = docking_port
+    
+    @property
+    def description(self):
+        return (f'{self.spacestation} -> {self.docking_port.docked_with} 对接分离\n'
+                f'\t预计执行时: {sec_to_date(int(self.start_time))}')
+
+    def _conn_setup(self):
+        if not switch_to_vessel(self.name):
+            return False
+        if not super()._conn_setup(f'undocking: {self.name}'):
+            return False
+        return True
+    
+    @logging_around
+    def start(self):
+        if not self._conn_setup():
+            return False
+        s = self.docking_port.undock()
+        sleep(3)
+        v = s.vessel
+        self.conn.space_center.active_vessel = v
+        v.control.rcs = True
+        v.control.forward = -0.1
+        sleep(5)
+        v.control.forward = 0
+        v.control.rcs = False
+        self.conn.close()
+
+        

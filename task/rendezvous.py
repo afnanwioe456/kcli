@@ -9,13 +9,13 @@ from ..utils import sec_to_date, switch_to_vessel, get_vessel_by_name, logging_a
 
 if TYPE_CHECKING:
     from .tasks import Tasks
-    from ..spacecrafts import Spacestation
+    from ..spacecrafts import SpaceStation
 
 
 class Rendezvous(Task):
     def __init__(self,
                  name: str,
-                 spacestation: Spacestation,
+                 spacestation: SpaceStation,
                  tasks: Tasks,
                  start_time=-1,
                  duration=300,
@@ -47,7 +47,7 @@ class Rendezvous(Task):
         nodes = mnv.to_krpcv(v)
         next_task: list[Task] = []
         for n in nodes:
-            task = ExecuteNode.from_node(self.vessel, n, self.tasks, 8)
+            task = ExecuteNode.from_node(self.vessel, n, self.tasks, importance=8)
             next_task.append(task)
         self.tasks.submit_nowait(next_task)
         
