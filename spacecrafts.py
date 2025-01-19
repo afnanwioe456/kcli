@@ -20,7 +20,46 @@ class SpacecraftBase:
 
     @property
     def vessel(self):
-        return get_vessel_by_name(self.name)
+        v = get_vessel_by_name(self.name)
+        if not v:
+            raise RuntimeError(f'{self.name} does not exist')
+        return v
+
+
+class Spacecraft(SpacecraftBase):
+    def __init__(self, name):
+        super().__init__(name)
+
+    @property
+    def main_engine(self):
+        ret = []
+        flag = False
+        engines = get_parts_in_stage_by_type(self.vessel, 'engine', self.vessel.control.current_stage)
+        for e in engines:
+            if 'main' in e.tag.split():
+                flag = True
+                ret.append(e)
+        if not flag:
+            ret = engines
+        return ret
+        
+    @main_engine.setter
+    def main_engine(self, value):
+        if not isinstance(value, bool):
+            raise ValueError(f"Value must be bool, got {type(value).__name__}")
+        for e in self.main_engine:
+            e.engine.active = value
+
+    @property
+    def rcs(self):
+        return get_parts_in_stage_by_type(self.vessel, 'rcs', self.vessel.control.current_stage)
+    
+    @rcs.setter
+    def rcs(self, value):
+        if not isinstance(value, bool):
+            raise ValueError(f"Value must be bool, got {type(value).__name__}")
+        for e in self.rcs:
+            e.rcs.active = value
 
 
 class SpaceStation(SpacecraftBase):
@@ -48,7 +87,7 @@ class SpaceStation(SpacecraftBase):
         return dps
 
     def _get_target_docking_port(self, docking_port_type):
-        dps = self.supply_docking_ports if docking_port_type is DockingPortType.supply else self.crew_docking_ports
+        dps = self.crew_docking_ports if docking_port_type is DockingPortType.crew else self.supply_docking_ports
         for p in dps:
             if p.is_free():
                 return p
@@ -76,9 +115,10 @@ class SpaceStation(SpacecraftBase):
 
 
 class KerbalSpaceStation(SpaceStation):
-    insert_orbit = (240000, 240000)
-    launch_lead_time = 360
-    launch_phase_diff = 40
+    _insert_orbit = (240000, 240000)
+    _launch_lead_time = 360
+    _min_phase_diff = 10
+    _max_phase_diff = 40
 
     def __init__(self):
         super().__init__('KSS')
@@ -89,44 +129,51 @@ class KerbalSpaceStation(SpaceStation):
 
     @logging_around
     def crew_mission(self, tasks: Tasks) -> list[Task]: 
+        return self._invoke_mission(tasks, DockingPortType.crew)
+    
+    @logging_around
+    def supply_mission(self, tasks: Tasks):
+        return self._invoke_mission(tasks, DockingPortType.supply)
+
+    def _invoke_mission(self, tasks: Tasks, dp_type):
+        # TODO: 重复创建任务冲突问题
         self._crew_mission_count += 1
         site_p = get_launch_site_position()
         orb = Orbit.from_krpcv(self.vessel)
-        launch_window = Orbit.launch_window(orb, site_p, 'SE', min_phase=self.launch_phase_diff)
+        launch_window = Orbit.launch_window(orb, 
+                                            site_p, 
+                                            'SE', 
+                                            min_phase=self._min_phase_diff, 
+                                            max_phase=self._max_phase_diff)
         launch_window = launch_window.to_value(u.s)
         inc = -np.degrees(self.vessel.orbit.inclination)
 
-        spacecraft_name = f'{self.name} crew mission {self._crew_mission_count}'
+        spacecraft = Spacecraft(f'{self.name} crew mission {self._crew_mission_count}')
         from .task.launch import Soyuz2Launch
         from .task.rendezvous import Rendezvous
         from .task.docking import Docking
-        launch_task = Soyuz2Launch(tasks,
-                                   name=spacecraft_name,
+        launch_task = Soyuz2Launch(tasks=tasks,
+                                   spacecraft=spacecraft,
                                    # payload_name='_Soyuz_Spacecraft',
-                                   ap_altitude=self.insert_orbit[0],
-                                   pe_altitude=self.insert_orbit[1],
+                                   ap_altitude=self._insert_orbit[0],
+                                   pe_altitude=self._insert_orbit[1],
                                    inclination=inc,
-                                   start_time=launch_window - self.launch_lead_time)
-        rdv_task = Rendezvous(spacecraft_name, self, tasks)
-        dock_task = Docking(spacecraft_name, 
+                                   start_time=launch_window - self._launch_lead_time)
+        rdv_task = Rendezvous(spacecraft, self, tasks)
+        dock_task = Docking(spacecraft, 
                             self, 
-                            self._get_target_docking_port(DockingPortType.crew), 
+                            self._get_target_docking_port(dp_type), 
                             tasks)
         return [launch_task, rdv_task, dock_task]
-    
+
     def _crew_return_mission(self, docking_port: DockingPortStatus, tasks: Tasks) -> list[Task]:
         deorbit_alt = 50000
-
         from .task.maneuver import SimpleMnv
         from .task.docking import Undocking
         undocking_task = Undocking(self, docking_port, tasks)
-        mnv_plan_task = SimpleMnv(docking_port.docked_with.name, tasks, 'pe', deorbit_alt * u.m, importance=0)
+        mnv_plan_task = SimpleMnv(docking_port.docked_with, tasks, 'pe', deorbit_alt * u.m, importance=0)
         # TODO: 回收
         return [undocking_task, mnv_plan_task]
-
-    def supply_mission(self, tasks: Tasks):
-        # TODO:
-        return self.crew_mission(tasks)
 
     def _supply_return_mission(self, docking_port, tasks) -> list[Task]:
         return self._crew_return_mission(docking_port, tasks)
@@ -163,6 +210,7 @@ class DockingPortStatus:
         for p in self.spacecraft.vessel.parts.docking_ports:
             if self.num in p.part.tag.split(' '):
                 return p
+        raise RuntimeError(f'{self.spacecraft} docking port [{self.num}] does not exist.')
     
     @staticmethod
     def from_krpc(part):

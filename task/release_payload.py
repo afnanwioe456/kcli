@@ -1,42 +1,32 @@
 from __future__ import annotations
 from time import sleep
-from krpc.services.spacecenter import Vessel
+from krpc.services.spacecenter import Vessel, VesselType
 
 from .tasks import Task
 from ..utils import *
 
 if TYPE_CHECKING:
     from .tasks import Tasks
+    from ..spacecrafts import Spacecraft
 
 
 class ReleasePayload(Task):
     def __init__(self,
-                 name,  # 载荷名称
+                 spacecraft: Spacecraft,
                  tasks: Tasks,
-                 count=1,  # 待分离的载荷数
-                 wait_time=10,
-                 start_time=-1,
-                 duration=180,
+                 start_time: int = -1,
+                 duration: int = 180,
+                 importance: int = 0,
+                 count: int = 1,  # 待分离的载荷数
                  ):
-        super().__init__(name, tasks, start_time, duration)
-        self.importance = 10
+        super().__init__(spacecraft, tasks, start_time, duration, importance)
         self.count = count
-        self.wait_time = wait_time
-        self.original_name = get_original_name(self.name)
-
-        self.conn = None
-        self.vessel = None
+        self.original_name = self.spacecraft._original_name
 
     @property
     def description(self):
         return (f'{self.name} 释放载荷: {self.count}\n'
                 f'\t预计执行时: {sec_to_date(self.start_time)}')
-
-    def _conn_setup(self, **kwargs):
-        if not switch_to_vessel(self.name):
-            return False
-        super()._conn_setup(f'{self.name} payload release')
-        return True
 
     @staticmethod
     def _deploy(vessel: Vessel,
@@ -52,15 +42,12 @@ class ReleasePayload(Task):
 
     @logging_around
     def start(self):
-        setup_flag = self._conn_setup()
-        if not setup_flag or self.conn is None or self.sc is None or self.vessel is None:
+        # TODO: 新载荷spacecraft对象问题
+        if not self._conn_setup():
             return
-        self.sc.quicksave()
-        sleep(5)
-
         self.vessel.name = vessel_namer(f'{self.name}_tmp')
         # 分级，释放第一个载荷会自动切换到载荷上
-        self._activate_next_stage()
+        self.vessel.control.activate_next_stage()
         LOGGER.debug(f'释放载荷：{self.vessel.name}')
         self.count -= 1
         adapter_name = self.vessel.name
@@ -82,7 +69,7 @@ class ReleasePayload(Task):
         while self.count > 0:
             past_vessels = self.sc.vessels
             # 分级，注意ksp不会自动切换到载荷上
-            self._activate_next_stage()
+            self.vessel.control.activate_next_stage()
             current_vessels = self.sc.vessels
             new_payloads = get_new_vessels(past_vessels, current_vessels)
             for p in new_payloads:
@@ -92,7 +79,7 @@ class ReleasePayload(Task):
             sleep(5)
             self.count -= 1
 
-        self.vessel.type = self.sc.VesselType.debris # type: ignore
+        self.vessel.type = VesselType.debris
         self.vessel.name += ' Debris'
         self.conn.close()
 

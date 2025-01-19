@@ -9,7 +9,7 @@ from ..utils import LOGGER, switch_to_vessel, sec_to_date, logging_around
 if TYPE_CHECKING:
     from krpc.client import Client
     from .tasks import Tasks
-    from ..spacecrafts import SpaceStation, DockingPortStatus
+    from ..spacecrafts import *
 
 
 def docking_with_target(conn: Client, ss: SpaceStation, docking_port: DockingPortStatus):
@@ -30,14 +30,14 @@ def docking_with_target(conn: Client, ss: SpaceStation, docking_port: DockingPor
 
 class Docking(Task):
     def __init__(self, 
-                 name: str, 
+                 spacecraft: SpacecraftBase, 
                  spacestation: SpaceStation,
                  docking_port: DockingPortStatus,
                  tasks: Tasks, 
                  start_time: int = -1, 
                  duration: int = 1800, 
                  importance: int = 3):
-        super().__init__(name, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance)
         self.spacestation = spacestation
         self.docking_port = docking_port
 
@@ -46,13 +46,6 @@ class Docking(Task):
         return (f'{self.name} -> {self.spacestation.name} 对接\n'
                 f'\t预计执行时: {sec_to_date(int(self.start_time))}')
 
-    def _conn_setup(self):
-        if not switch_to_vessel(self.name):
-            return False
-        if not super()._conn_setup(f'docking: {self.name}'):
-            return False
-        return True
-    
     @logging_around
     def start(self):
         if self.docking_port.is_docked():
@@ -82,27 +75,21 @@ class Undocking(Task):
                  start_time: int = -1, 
                  duration: int = 1800, 
                  importance: int = 3):
-        super().__init__(spacestation.name, tasks, start_time, duration, importance)
+        super().__init__(spacestation, tasks, start_time, duration, importance)
         self.spacestation = spacestation
         self.docking_port = docking_port
     
     @property
     def description(self):
-        return (f'{self.spacestation} -> {self.docking_port.docked_with} 对接分离\n'
+        return (f'{self.spacestation}对接口[{self.docking_port.num}] -> 对接分离\n'
                 f'\t预计执行时: {sec_to_date(int(self.start_time))}')
 
-    def _conn_setup(self):
-        if not switch_to_vessel(self.name):
-            return False
-        if not super()._conn_setup(f'undocking: {self.name}'):
-            return False
-        return True
-    
     @logging_around
     def start(self):
         if not self._conn_setup():
             return False
         s = self.docking_port.undock()
+        self.spacecraft = s
         sleep(3)
         v = s.vessel
         self.conn.space_center.active_vessel = v

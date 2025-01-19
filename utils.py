@@ -9,6 +9,9 @@ import krpc.services
 
 from .repository import *
 
+if TYPE_CHECKING:
+    from krpc.services.spacecenter import Vessel, Part
+
 KSP_EPOCH_TIME = -599616000
 LAUNCH_SITES_COORDS = {
     'wenchang': (19.613726150307052, 110.9553275138089)
@@ -51,8 +54,7 @@ def logging_around(func):
             func_name = func.__name__
             attrs = dir(instance)
             task_name = instance.name if 'name' in attrs else 'Instance'
-            task_descr = instance.short_description if 'short_description' in attrs else ''
-            LOGGER.debug(f'{task_name} entering {class_name}.{func_name}\n{task_descr}')
+            LOGGER.debug(f'{task_name} entering {class_name}.{func_name}')
             log_flag = True
         try:
             result = func(*args, **kwargs)
@@ -85,28 +87,24 @@ def time_wrap(start_time):
 
 def date_to_sec(input_date: str) -> int | None:
     """
-    日期转换为自1951-01-01 00:00:00的秒数，没有输入或无法解析时返回None
+    日期转换为自1951-01-01 00:00:00的秒数, 无法解析时返回None
     """
-    if not input_date:
-        return
-
     try:
-        default_date = str(sec_to_date(int(get_ut())).date())
         # 尝试使用dateutil.parser解析输入
         parsed_date = parser.parse(input_date).replace(tzinfo=tz.tzutc())
         # 如果没有输入日期
         if parsed_date.date() == parser.parse('00:00:00').date():
+            default_date = str(sec_to_date(int(get_ut())).date())
             parsed_date = parser.parse(f'{default_date} {input_date}').replace(tzinfo=tz.tzutc())
         epoch_date = parser.parse("1970-01-01 00:00:00 UTC")
         time_difference = parsed_date - epoch_date
         seconds_since_epoch = int(time_difference.total_seconds())
         seconds_since_ksp_epoch = seconds_since_epoch - KSP_EPOCH_TIME
     except ValueError:
-        print("无法解析输入的时间格式，请确保输入的格式为支持的格式。")
+        LOGGER.warning("无法解析输入的时间格式，请确保输入的格式为支持的格式。")
         return
 
     if seconds_since_ksp_epoch is not None:
-        print(f"{input_date} 转换为ksp历时: {seconds_since_ksp_epoch}秒")
         return seconds_since_ksp_epoch
 
 
@@ -165,7 +163,7 @@ def get_original_name(name) -> str:
 
 ### VESSEL ###
 
-def get_new_vessels(past_vessels, current_vessels) -> list:
+def get_new_vessels(past_vessels, current_vessels) -> list[Vessel]:
     new_vessels = list(set(current_vessels) - set(past_vessels))
     target_vessels = []
     for v in new_vessels:
@@ -194,6 +192,15 @@ def get_vessel_by_name(name):
         if v.name == name:
             return v
     LOGGER.debug(f'{name}: 载具不存在!')
+
+
+def get_parts_in_stage_by_type(vessel: Vessel, target: str, stage: int) -> list[Part]:
+    parts_in_stage = vessel.parts.in_stage(stage)
+    part_list = []
+    for i in parts_in_stage:
+        if getattr(i, target):
+            part_list.append(i)
+    return part_list
 
 ### ABORT ###
 

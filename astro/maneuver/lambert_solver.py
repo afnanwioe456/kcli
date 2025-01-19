@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 from astropy import units as u
 
-from ..core.bond import bond
 from ..core.izzo import izzo
 
 if TYPE_CHECKING:
@@ -30,11 +29,12 @@ def opt_lambert_by_grid_search(orbit_v: Orbit,
     """
     from .create import Maneuver
     best_dv = np.inf * u.km / u.s
+    best_lam = None
     epoch = orbit_v.epoch.to_value(u.s)
     pv = orbit_v.period.to_value(u.s)
     pt = orbit_t.period.to_value(u.s)
     if before is None:
-        before = 5 * pv + epoch
+        before = 10 * pv + epoch
     else:
         before = before.to_value(u.s)
     trans_l = 0.25 * min(pv,pt)
@@ -59,6 +59,8 @@ def opt_lambert_by_grid_search(orbit_v: Orbit,
                     best_tt = t2
                     best_dv = total_dv
                     best_lam = lambert
+        if best_lam is None:
+            raise ValueError('No possible solution.')
         wait_l = max(best_wt - wait_step, wait_l)
         wait_r = min(best_wt + wait_step, wait_r)
         trans_l = max(best_tt - trans_step, trans_l)

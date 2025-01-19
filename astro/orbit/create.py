@@ -216,9 +216,10 @@ class Orbit(OrbitBase):
                       site_p: np.ndarray, 
                       direction: str = 'SE', 
                       cloest: bool = False, 
-                      min_phase: float = 40, 
+                      min_phase: float = 10, 
+                      max_phase: float = 30,
                       start_period: int = 0, 
-                      end_period: int = 30):
+                      end_period: int = 90) -> u.Quantity:
         """发射场向轨道发射的时刻
 
         Args:
@@ -232,7 +233,7 @@ class Orbit(OrbitBase):
         Returns:
             float: 发射窗口
         """
-        ut: float = orbit_launch_window(self, site_p, direction, cloest, min_phase, start_period, end_period)
+        ut = orbit_launch_window(self, site_p, direction, cloest, min_phase, max_phase, start_period, end_period)
         return ut
 
     def cheat(self, ut=None):

@@ -5,11 +5,13 @@ import aiohttp
 
 from .blivedm import BLiveClient, BaseHandler
 from .blivedm.models import web as web_models
-from .command import Command, ShortCommand, ChatMsg
+from .command import Command, ChatMsg
 from .utils import LOGGER
 
 
 ROOT = "650021430"
+COMMAND_SIGN = ['!', '！']
+SEP_SIGN = ['/', '\\']
 
 
 class Listener:
@@ -84,17 +86,17 @@ class Listener:
         chat_msg = ChatMsg(str(message.rnd), message.msg, str(message.uid), message.uname, message.timestamp)
         text = chat_msg.chat_text
         nickname = chat_msg.user_name
-        if text[0] == '!' and text[-1] == '/':  # 不完整指令的第一句
+        if text[0] in COMMAND_SIGN and text[-1] in SEP_SIGN:  # 不完整指令的第一句
             self._incomplete_chat_dic[nickname] = text[:-1] + ' '
-        elif text[0] == '/' and text[-1] == '/' and nickname in self._incomplete_chat_dic.keys():  # 不完整指令的中间句
+        elif text[0] in SEP_SIGN and text[-1] in SEP_SIGN and nickname in self._incomplete_chat_dic.keys():  # 不完整指令的中间句
             self._incomplete_chat_dic[nickname] += text[1:-1] + ' '
-        elif text[0] == '/' and nickname in self._incomplete_chat_dic.keys():  # 不完整指令的最后一句
+        elif text[0] in SEP_SIGN and nickname in self._incomplete_chat_dic.keys():  # 不完整指令的最后一句
             self._incomplete_chat_dic[nickname] += text[1:]
             chat_msg.chat_text = self._incomplete_chat_dic[nickname]
             self._incomplete_chat_dic.pop(nickname, None)
             return Command(chat_msg)
-        elif text[0] == '!':  # 短指令
-            return ShortCommand(chat_msg)
+        elif text[0] in COMMAND_SIGN:  # 短指令
+            return Command(chat_msg)
 
 
 class ListenerHandler(BaseHandler):

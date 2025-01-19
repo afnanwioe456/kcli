@@ -23,8 +23,9 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
     prev_time = sc.ut
     stable = 0
 
-    vessel.control.sas_mode = SASMode.target
+    sc.target_vessel = target
     vessel.control.sas = True
+    vessel.control.sas_mode = SASMode.target
     while True:
         sleep(rate)
         cur_time = sc.ut

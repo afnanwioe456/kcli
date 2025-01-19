@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING
 from krpc.client import Client
 from krpc.services.spacecenter import Vessel
 from krpc.event import Event as krpcEvent
-from ..utils import LOGGER, UTIL_CONN, logging_around
+from ..utils import LOGGER, UTIL_CONN, logging_around, switch_to_vessel
 
 if TYPE_CHECKING:
     from command import ChatMsg
+    from ..spacecrafts import SpacecraftBase
 
 MAX_IMPORTANCE = 9
 """
@@ -32,13 +33,14 @@ class Task:
     event_list: list[krpcEvent]
 
     def __init__(self,
-                 name: str,
+                 spacecraft: SpacecraftBase,
                  tasks: Tasks,
                  start_time: float,
                  duration: int,
                  importance: int = 3,
                  ):
-        self.name = name
+        self.spacecraft = spacecraft
+        self.name = self.spacecraft.name
         self.tasks = tasks
         self.importance = importance
         self.start_time = start_time
@@ -62,73 +64,25 @@ class Task:
     def __str__(self):
         return self.description
 
-    def _conn_setup(self, conn_name: str):
-        self.conn = krpc.connect(conn_name)
+    def _conn_setup(self):
+        self.vessel = self.spacecraft.vessel
+        if not switch_to_vessel(self.vessel.name):
+            return False
+        self.conn = krpc.connect(self.name)
         self.sc = self.conn.space_center
         if self.sc is None:
             return False
-        self.sc.quicksave()
-        self.vessel = self.sc.active_vessel
         self.mj = self.conn.mech_jeb # type: ignore
-        self.stage = self.vessel.control.current_stage
-        if self.conn.krpc is None:
-            return False
-        self.expression = self.conn.krpc.Expression
         return True
-
-    def _activate_next_stage(self) -> list[Vessel]:
-        jettisoned_vessel_list = self.vessel.control.activate_next_stage()
-        self.stage = self.vessel.control.current_stage
-        return jettisoned_vessel_list
-
-    def _act_part_list_by_type(self,
-                               target: str = "engine",
-                               stage: int | None = None) -> list:
-        if stage is None:
-            stage = self.stage
-        parts_in_stage = self.vessel.parts.in_stage(stage)
-        part_list = []
-        for i in parts_in_stage:
-            if getattr(i, target):
-                part_list.append(getattr(i, target))
-        return part_list
-
-    def _sep_part_list_by_name(self,
-                               name: str,
-                               stage: int | None = None) -> list:
-        if stage is None:
-            stage = self.stage
-        parts_in_stage = self.vessel.parts.in_decouple_stage(stage)
-        part_list = []
-        for i in parts_in_stage:
-            if name in i.title:
-                part_list.append(i)
-        return part_list
-
-    def _wait_for_events(self):
-        while self.event_list:
-            event = self.event_list.pop()
-            with event.condition:
-                try:
-                    event.wait(timeout=self.time_out)
-                except RuntimeError as e:
-                    print("EventRuntimeError:", e)
-                    break
-            event.remove()
-            break
-            # TODO: 并发等待需要完善
-        if self.event_list:
-            [event.remove() for event in self.event_list]
-            self.event_list.clear()
 
     @logging_around
     def start(self):
-        self._conn_setup('undefined')
+        self._conn_setup()
 
 
 class Tasks:
     current_task: Task | None
-    task_list: list[Task]
+    _task_list: list[Task]
 
     def __init__(self,
                  msg: ChatMsg,
@@ -138,8 +92,8 @@ class Tasks:
         """
         任务序列，一个指令或某个任务自身产生的一系列任务
         """
+        self._task_list = []  # 等待执行的任务序列
         self.current_task: Task | None = None
-        self.task_list = []  # 等待执行的任务序列
         self.msg = msg
         self.id = id  # 对应的指令编号
         self.task_queue = task_queue
@@ -147,12 +101,12 @@ class Tasks:
     
     @property
     def next_task(self) -> Task | None:
-        return self.task_list[0] if self.task_list else None
+        return self._task_list[0] if self._task_list else None
 
     def submit(self, task: Task | list[Task]):
         if not isinstance(task, list):
             task = [task]
-        self.task_list += task
+        self._task_list += task
 
         log = (f"Tasks [{self.id}] added {len(task)} new Task(s):\n"
                f"{task[0].short_description}")
@@ -161,7 +115,7 @@ class Tasks:
     def submit_nowait(self, task: Task | list[Task]):
         if not isinstance(task, list):
             task = [task]
-        self.task_list = task + self.task_list
+        self._task_list = task + self._task_list
 
         log = (f"Tasks [{self.id}] added {len(task)} new Task(s):\n"
                f"{task[0].short_description}")
@@ -170,7 +124,7 @@ class Tasks:
     def do(self) -> Tasks | None:
         if not self.next_task:
             return
-        self.current_task = self.task_list.pop(0)
+        self.current_task = self._task_list.pop(0)
         self.task_queue.write()
         log = (f"Tasks [{self.id}] launching a new Task:\n"
                f"{self.current_task.description}")
@@ -415,12 +369,3 @@ if __name__ == '__main__':
     print(t.next_task.start_time) # type: ignore
     t = TQ.get()
     print(t.next_task.start_time) # type: ignore
-
-
-
-
-
-
-
-
-

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 class OrbitBase:
     def __init__(self):
         self.attractor: Body = None
-        self._epoch: float = None
+        self._epoch: u.Quantity = None
         self._a: u.Quantity = None
         self._h: u.Quantity = None
         self._e: u.Quantity = None
