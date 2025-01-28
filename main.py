@@ -20,7 +20,7 @@ def listener_loop():
             asyncio.run(chat_listener._stop())
             sleep(3)
             break
-        t = command.process(task_queue)
+        t = command.process()
         if t is None or t.next_task is None:
             continue
 

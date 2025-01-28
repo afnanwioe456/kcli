@@ -12,6 +12,10 @@ if TYPE_CHECKING:
     from ..spacecrafts import SpaceStation
     from ..spacecrafts import SpacecraftBase
 
+__all__ = [
+    'Rendezvous',
+]
+
 
 class Rendezvous(Task):
     def __init__(self,

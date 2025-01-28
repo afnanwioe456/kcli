@@ -11,6 +11,11 @@ if TYPE_CHECKING:
     from .tasks import Tasks
     from ..spacecrafts import *
 
+__all__ = [
+    'Docking',
+    'Undocking',
+]
+
 
 def docking_with_target(conn: Client, ss: SpaceStation, docking_port: DockingPortStatus):
     conn.space_center.target_vessel = ss.vessel

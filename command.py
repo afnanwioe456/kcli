@@ -1,15 +1,12 @@
 from __future__ import annotations
-
 from docopt import docopt
 import random
 
 from .task.launch import *
-from .task.tasks import Tasks
+from .task.tasks import *
 from .spacecrafts import *
 from .utils import *
 
-if TYPE_CHECKING:
-    from task.tasks import TaskQueue
 
 LAUNCH_DOC = f"""
 Usage:
@@ -102,7 +99,7 @@ class Command:
         self.start_time = -1
         self.msg = msg
 
-    def process(self, task_queue: TaskQueue) -> Tasks | None:
+    def process(self) -> Tasks | None:
         """
         处理命令并返回生成的Tasks
         """
@@ -114,21 +111,21 @@ class Command:
         if command_type == 'payload':
             return
         if command_type == 'remove':
-            task_queue.remove_by_user(self.msg.user_id)
+            TaskQueue.remove_by_user(self.msg.user_id)
             return
         if command_type == 'queue':
             return
         if command_type in ['launch', 'la']:
-            return self._launch_command_process(command_args, task_queue)
+            return self._launch_command_process(command_args)
         if command_type in SPACESTATION_DIC.keys():
-            return self._spacestation_command_process(command_args, task_queue)
+            return self._spacestation_command_process(command_args)
         if command_type == 'ss':
             return
         if command_type == 'n':
             return
         LOGGER.warning(f'@{self.msg.user_id} 未知指令{command_type}, 使用"!help"指令查看可用指令.')
 
-    def _launch_command_process(self, command_args, task_queue) -> Tasks | None:
+    def _launch_command_process(self, command_args) -> Tasks | None:
         try: 
             args = docopt(LAUNCH_DOC, command_args)
         except SystemExit:
@@ -175,7 +172,7 @@ class Command:
         priority = args['--priority']
         start_time = date_to_sec(args['--time']) if args['--time'] else -1
 
-        self.tasks = Tasks(self.msg, task_queue)
+        self.tasks = Tasks(self.msg)
         self.tasks.submit(executor(
             tasks=self.tasks, 
             spacecraft=Spacecraft(name), 
@@ -187,7 +184,7 @@ class Command:
             importance=int(priority)))
         return self.tasks
 
-    def _spacestation_command_process(self, command_args, task_queue) -> Tasks | None:
+    def _spacestation_command_process(self, command_args) -> Tasks | None:
         try: 
             args = docopt(SS_DOC, command_args)
         except SystemExit:
@@ -196,7 +193,7 @@ class Command:
             LOGGER.warning(f'@{self.msg.user_id} 无法解析指令, 使用"!ss -h"指令查看空间站指令帮助.')
             return
 
-        self.tasks = Tasks(self.msg, task_queue)
+        self.tasks = Tasks(self.msg)
         spacestation = SPACESTATION_DIC.get(args['<space-station>'], None)
         if not spacestation:
             LOGGER.warning(f'@{self.msg.user_name} 未知空间站{args["<space-station>"]}, 使用"!ss"指令查看可用空间站.')

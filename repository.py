@@ -21,10 +21,10 @@ QUEUE_DIR = REPO_DIR + "\\task_queue.txt"
 SAVE_DIR = REPO_DIR + "\\save.json"
 
 
-def save(task_queue: TaskQueue):
+def save():
     data =  {
         'spacecraft': SpacecraftBase.dump_all(),
-        'task_queue': task_queue.dump_all(),
+        'task_queue': TaskQueue.dump_all(),
     }
     with open(SAVE_DIR, 'w') as file:
         json.dump(data, file, indent=4)
@@ -34,7 +34,7 @@ def load():
     with open(SAVE_DIR, 'r') as file:
         data = json.load(file)
     SpacecraftBase.load_all(data['spacecraft'])
-    return TaskQueue.load_all(data['task_queue'])
+    TaskQueue.load_all(data['task_queue'])
 
 
 def write_helper(content: str):

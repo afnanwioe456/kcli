@@ -9,6 +9,10 @@ if TYPE_CHECKING:
     from .tasks import Tasks
     from ..spacecrafts import Spacecraft
 
+__all__ = [
+    'ReleasePayload',
+]
+
 
 class ReleasePayload(Task):
     def __init__(self,

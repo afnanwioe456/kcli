@@ -9,6 +9,13 @@ if TYPE_CHECKING:
     from .tasks import Tasks
     from ..spacecrafts import Spacecraft
 
+__all__ = [
+    'Launch',
+    'Soyuz2Launch',
+    'LongMarch7Launch',
+    'LAUNCH_ROCKET_DIC',
+    'LAUNCH_PAYLOAD_DIC',
+]
 
 class Launch(Task):
     payload_type = []  # 可以搭载的载荷
