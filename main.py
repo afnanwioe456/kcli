@@ -40,11 +40,7 @@ def worker():
 
         LOGGER.debug(f'Thread [{threading.current_thread().name}] processing tasks')
         LOGGER.info(f'执行任务:\n{tasks.next_task.description}')
-        tasks = tasks.do()
-
-        if tasks is None or tasks.abort_flag == True:
-            continue
-        task_queue.put(tasks)
+        tasks.do()
         task_queue.worker_lock.release()
 
 

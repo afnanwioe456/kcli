@@ -4,7 +4,7 @@ from time import sleep
 
 from .tasks import Task
 from ..autopilot import get_closer
-from ..utils import LOGGER, switch_to_vessel, sec_to_date, logging_around
+from ..utils import LOGGER, sec_to_date, logging_around
 
 if TYPE_CHECKING:
     from krpc.client import Client
@@ -65,6 +65,27 @@ class Docking(Task):
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking completed')
         self.vessel.control.rcs = False
         self.conn.close()
+    
+    def _to_dict(self):
+        dic = {
+            'spacestation_name': self.spacestation.name,
+            'docking_port_num': self.docking_port.num,
+        }
+        return super()._to_dict() | dic
+
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        ss: SpaceStation = SpacecraftBase.get(data['spacestation_name'])
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacestation = ss,
+            docking_port = ss.get_docking_port(data['docking_port_num']),
+            tasks = tasks,
+            start_time = data['start_time'],
+            duration = data['duration'],
+            importance = data['importance'],
+        )
 
 
 class Undocking(Task):
@@ -100,4 +121,24 @@ class Undocking(Task):
         v.control.rcs = False
         self.conn.close()
 
+    def _to_dict(self):
+        dic = {
+            'spacestation_name': self.spacestation.name,
+            'docking_port_num': self.docking_port.num,
+        }
+        return super()._to_dict() | dic
+
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        ss: SpaceStation = SpacecraftBase.get(data['spacestation_name'])
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacestation = ss,
+            docking_port = ss.get_docking_port(data['docking_port_num']),
+            tasks = tasks,
+            start_time = data['start_time'],
+            duration = data['duration'],
+            importance = data['importance'],
+        )
         

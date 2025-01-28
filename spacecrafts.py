@@ -1,6 +1,5 @@
 from __future__ import annotations
 from functools import cached_property
-from time import sleep
 import numpy as np
 from astropy import units as u
 
@@ -12,11 +11,32 @@ if TYPE_CHECKING:
 
 
 class SpacecraftBase:
-    def __init__(self, name):
-        self.name = name
+    _spacecraft_dic = {}
+    
+    def __init__(self, name: str):
+        self._original_name = name
+        self.name, self._tail = self._namer(name)
+        self._spacecraft_dic[self.name] = self
 
     def __str__(self):
         return self.name
+
+    def _namer(self, name):
+        if name not in self._spacecraft_dic.keys():
+            return name, 1
+        tail = 1
+        for s in self._spacecraft_dic.values():
+            if name == s._original_name and s._tail > tail:
+                tail = s._tail
+        tail += 1
+        return f'{name} #{tail}', tail
+
+    @classmethod
+    def get(cls, name) -> SpacecraftBase:
+        return cls._spacecraft_dic.get(name, None)
+        
+    def remove(self):
+        self._spacecraft_dic.pop(self.name, None)
 
     @property
     def vessel(self):
@@ -25,9 +45,39 @@ class SpacecraftBase:
             raise RuntimeError(f'{self.name} does not exist')
         return v
 
+    def _to_dict(self):
+        return {
+            'type': self.__class__.__name__,
+            '_original_name': self._original_name,
+            '_tail': self._tail,
+            'name': self.name,
+        }
+
+    @classmethod
+    def _from_dict(cls, data):
+        ret = cls(data['name'])
+        ret._original_name = data['_original_name']
+        ret._tail = data['_tail']
+        return ret
+
+    @classmethod
+    def dump_all(cls):
+        data = [s._to_dict() for s in cls._spacecraft_dic.values()]
+        return data
+
+    @staticmethod
+    def load_all(data):
+        for item in data:
+            class_name = item['type']
+            cls = globals().get(class_name, None)
+            if cls and issubclass(cls, SpacecraftBase):
+                cls._from_dict(item)
+            else:
+                raise ValueError(f'Unknown or invalid class type: {class_name}')
+
 
 class Spacecraft(SpacecraftBase):
-    def __init__(self, name):
+    def __init__(self, name: str):
         super().__init__(name)
 
     @property
@@ -66,7 +116,7 @@ class SpaceStation(SpacecraftBase):
     _crew_mission_count = 0
     _supply_mission_count = 0
 
-    def __init__(self, name):
+    def __init__(self, name: str):
         super().__init__(name)
         self._docking_ports: list[DockingPortStatus] = []
 
@@ -86,8 +136,19 @@ class SpaceStation(SpacecraftBase):
                 dps.append(p)
         return dps
 
-    def _get_target_docking_port(self, docking_port_type):
-        dps = self.crew_docking_ports if docking_port_type is DockingPortType.crew else self.supply_docking_ports
+    def get_docking_port(self, num: str):
+        num = str(num)
+        for dp in self._docking_ports:
+            if dp.num == num:
+                return dp
+
+    def _get_target_docking_port(self, docking_port_type: str):
+        if docking_port_type == 'crew':
+            dps = self.crew_docking_ports
+        elif docking_port_type == 'supply':
+            dps = self.supply_docking_ports
+        else:
+            raise ValueError(docking_port_type)
         for p in dps:
             if p.is_free():
                 return p
@@ -113,6 +174,24 @@ class SpaceStation(SpacecraftBase):
             return self._supply_return_mission(docking_port, tasks)
         raise NotImplementedError()
 
+    def _to_dict(self):
+        dic = {
+        '_crew_mission_count': self._crew_mission_count,
+        '_supply_mission_count': self._supply_mission_count,
+        '_docking_ports': [dp._to_dict() for dp in self._docking_ports],
+        }
+        return super()._to_dict() | dic
+
+    @classmethod
+    def _from_dict(cls, data):
+        ret = cls(data['name'])
+        ret._original_name = data['_original_name']
+        ret._tail = data['_tail']
+        ret._crew_mission_count = data['_crew_mission_count']
+        ret._supply_mission_count = data['_supply_mission_count']
+        ret._docking_ports = [DockingPortStatus._from_dict(d) for d in data['_docking_ports']]
+        return ret
+        
 
 class KerbalSpaceStation(SpaceStation):
     _insert_orbit = (240000, 240000)
@@ -120,7 +199,7 @@ class KerbalSpaceStation(SpaceStation):
     _min_phase_diff = 10
     _max_phase_diff = 40
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         super().__init__('KSS')
         self._docking_ports = [
             DockingPortStatus(self, '1', DockingPortType.crew),
@@ -129,15 +208,22 @@ class KerbalSpaceStation(SpaceStation):
 
     @logging_around
     def crew_mission(self, tasks: Tasks) -> list[Task]: 
-        return self._invoke_mission(tasks, DockingPortType.crew)
+        return self._invoke_mission(tasks, 'crew')
     
     @logging_around
     def supply_mission(self, tasks: Tasks):
-        return self._invoke_mission(tasks, DockingPortType.supply)
+        return self._invoke_mission(tasks, 'supply')
 
-    def _invoke_mission(self, tasks: Tasks, dp_type):
+    def _invoke_mission(self, tasks: Tasks, mission_type: str):
         # TODO: 重复创建任务冲突问题
-        self._crew_mission_count += 1
+        if mission_type == 'crew':
+            self._crew_mission_count += 1
+            counter = self._crew_mission_count
+        elif mission_type == 'supply':
+            self._supply_mission_count += 1
+            counter = self._supply_mission_count
+        else:
+            raise ValueError(mission_type)
         site_p = get_launch_site_position()
         orb = Orbit.from_krpcv(self.vessel)
         launch_window = Orbit.launch_window(orb, 
@@ -148,12 +234,12 @@ class KerbalSpaceStation(SpaceStation):
         launch_window = launch_window.to_value(u.s)
         inc = -np.degrees(self.vessel.orbit.inclination)
 
-        spacecraft = Spacecraft(f'{self.name} crew mission {self._crew_mission_count}')
+        spacecraft = Spacecraft(f'{self.name} crew mission {counter}')
         from .task.launch import Soyuz2Launch
         from .task.rendezvous import Rendezvous
         from .task.docking import Docking
-        launch_task = Soyuz2Launch(tasks=tasks,
-                                   spacecraft=spacecraft,
+        launch_task = Soyuz2Launch(spacecraft=spacecraft,
+                                   tasks=tasks,
                                    # payload_name='_Soyuz_Spacecraft',
                                    ap_altitude=self._insert_orbit[0],
                                    pe_altitude=self._insert_orbit[1],
@@ -162,7 +248,7 @@ class KerbalSpaceStation(SpaceStation):
         rdv_task = Rendezvous(spacecraft, self, tasks)
         dock_task = Docking(spacecraft, 
                             self, 
-                            self._get_target_docking_port(dp_type), 
+                            self._get_target_docking_port(mission_type), 
                             tasks)
         return [launch_task, rdv_task, dock_task]
 
@@ -181,23 +267,31 @@ class KerbalSpaceStation(SpaceStation):
 
 class DockingPortStatus:
     def __init__(self, 
-                 spacecraft: SpaceStation, 
+                 spacecraft: SpacecraftBase, 
                  num: str, 
                  type: int):
-        self.spacecraft = spacecraft
+        self._spacecraft_name = spacecraft.name
         self.num = num
-        self.docked_with: SpacecraftBase | None = None
+        self._docked_with: str | None = None
         self._type = type
-        self._scheduled_count = 0
+        
+    @property
+    def spacecraft(self) -> SpacecraftBase:
+        return SpacecraftBase.get(self._spacecraft_name)
+
+    @property
+    def docked_with(self) -> SpacecraftBase:
+        return SpacecraftBase.get(self._docked_with)
+
+    @docked_with.setter
+    def docked_with(self, spacecraft: SpacecraftBase):
+        self._docked_with = spacecraft.name
 
     def is_free(self):
-        return self.docked_with is None and self._scheduled_count == 0
+        return self._docked_with is None
 
-    def is_scheduled(self):
-        return self._scheduled_count > 0
-    
     def is_docked(self):
-        return self.docked_with is not None
+        return self._docked_with is not None
 
     def is_crew(self):
         return self._type is DockingPortType.crew
@@ -216,14 +310,6 @@ class DockingPortStatus:
     def from_krpc(part):
         raise NotImplementedError()
 
-    def schedule(self):
-        self._scheduled_count += 1
-
-    def unschedule(self):
-        if not self.is_scheduled():
-            raise RuntimeError(f'{self.spacecraft} docking port [{self.num}]: not scheduled!')
-        self._scheduled_count -= 1
-
     def dock_with(self, spacecraft):
         if self.is_docked():
             raise RuntimeError(f'{self.spacecraft} docking port [{self.num}]: already docked with {self.docked_with}!')
@@ -238,6 +324,20 @@ class DockingPortStatus:
         return_sc = self.docked_with
         self.docked_with = None
         return return_sc
+
+    def _to_dict(self):
+        return {
+        '_spacecraft': self._spacecraft_name,
+        'num': self.num,
+        '_docked_with': self._docked_with,
+        '_type': self._type,
+        }
+
+    @classmethod
+    def _from_dict(cls, data):
+        ret = cls(SpacecraftBase.get(data['_spacecraft']), data['num'], data['_type'])
+        ret._docked_with = data['_docked_with']
+        return ret
 
 
 class DockingPortType:

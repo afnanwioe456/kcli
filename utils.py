@@ -7,11 +7,10 @@ import logging
 import krpc
 import krpc.services
 
-from .repository import *
-
 if TYPE_CHECKING:
     from krpc.services.spacecenter import Vessel, Part
 
+_DEBUG_MODE = False
 KSP_EPOCH_TIME = -599616000
 LAUNCH_SITES_COORDS = {
     'wenchang': (19.613726150307052, 110.9553275138089)
@@ -26,7 +25,7 @@ def setup_logger():
     file_handler = logging.FileHandler("krpc_live/.live/log.txt", encoding="utf-8")
     file_handler.setLevel(logging.INFO)
 
-    debug_file_handler = logging.FileHandler("krpc_live/krpclive.log", encoding="utf-8")
+    debug_file_handler = logging.FileHandler("krpc_live/.live/debug.log", encoding="utf-8")
     debug_file_handler.setLevel(logging.DEBUG)
 
     console_handler = logging.StreamHandler()
@@ -69,12 +68,13 @@ def logging_around(func):
             
 ### GLOBAL CONNECTION ###
 
-UTIL_CONN = None
-UTIL_CONN = krpc.connect('krpclive', address='127.0.0.1', rpc_port=65534, stream_port=65535)
+UTIL_CONN = None if _DEBUG_MODE else krpc.connect('krpclive', address='127.0.0.1', rpc_port=65534, stream_port=65535)
 
 ### IN-GAME TIME CONTROL ###
 
 def get_ut():
+    if _DEBUG_MODE:
+        return 0.
     return UTIL_CONN.space_center.ut
 
 
@@ -130,6 +130,8 @@ def get_launch_site_position(site: str = 'wenchang'):
 
 def vessel_namer(name: str,
                  neg: list[str] = None) -> str:
+    if _DEBUG_MODE:
+        return name
     if neg is None:
         neg = []
     sc = UTIL_CONN.space_center

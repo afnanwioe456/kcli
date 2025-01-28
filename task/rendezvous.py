@@ -18,12 +18,12 @@ class Rendezvous(Task):
                  spacecraft: SpacecraftBase,
                  spacestation: SpaceStation,
                  tasks: Tasks,
-                 start_time=-1,
-                 duration=300,
+                 start_time: int = -1,
+                 duration: int = 300,
+                 importance: int = 6, 
                  ):
-        super().__init__(spacecraft, tasks, start_time, duration)
+        super().__init__(spacecraft, tasks, start_time, duration, importance)
         self.spacestation = spacestation
-        self.conn = None
 
     @property
     def description(self):
@@ -44,4 +44,21 @@ class Rendezvous(Task):
             next_task.append(task)
         self.tasks.submit_nowait(next_task)
         
+    def _to_dict(self):
+        dic = {
+            'spacestation_name': self.spacestation.name,
+        }
+        return super()._to_dict() | dic
+    
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacestation = SpacecraftBase.get(data['spacestation_name']),
+            tasks = tasks,
+            start_time = data['start_time'],
+            duration = data['duration'],
+            importance = data['importance'],
+        )
         

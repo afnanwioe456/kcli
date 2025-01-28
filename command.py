@@ -81,17 +81,26 @@ class ChatMsg:
     def __str__(self):
         return f'{self.user_name}: {self.chat_text} @ {self.time}'
 
+    def _to_dict(self):
+        return {
+            'chat_id': self.chat_id,
+            'chat_text': self.chat_text,
+            'user_id': self.user_id,
+            'user_name': self.user_name,
+            'time': self.time
+        }
+
+    @classmethod
+    def _from_dict(cls, data):
+        return cls(data['chat_id'], data['chat_text'], data['user_id'], data['user_name'], data['time'])
+
 
 class Command:
-    count = 0
-
     def __init__(self, msg: ChatMsg):
         self.tasks: Tasks | None = None
         self.importance = 0
         self.start_time = -1
         self.msg = msg
-        Command.count += 1
-        self.count = Command.count
 
     def process(self, task_queue: TaskQueue) -> Tasks | None:
         """
@@ -166,17 +175,16 @@ class Command:
         priority = args['--priority']
         start_time = date_to_sec(args['--time']) if args['--time'] else -1
 
-        self.tasks = Tasks(self.msg, self.count, task_queue)
-        # TODO: 重构launch不传参spacecraft
+        self.tasks = Tasks(self.msg, task_queue)
         self.tasks.submit(executor(
             tasks=self.tasks, 
             spacecraft=Spacecraft(name), 
-            payload_name=payload, 
+            payload=payload, 
             ap_altitude=ap, 
             pe_altitude=pe,
             inclination=inc, 
             start_time=start_time,
-            importance=priority))
+            importance=int(priority)))
         return self.tasks
 
     def _spacestation_command_process(self, command_args, task_queue) -> Tasks | None:
@@ -188,7 +196,7 @@ class Command:
             LOGGER.warning(f'@{self.msg.user_id} 无法解析指令, 使用"!ss -h"指令查看空间站指令帮助.')
             return
 
-        self.tasks = Tasks(self.msg, self.count, task_queue)
+        self.tasks = Tasks(self.msg, task_queue)
         spacestation = SPACESTATION_DIC.get(args['<space-station>'], None)
         if not spacestation:
             LOGGER.warning(f'@{self.msg.user_name} 未知空间站{args["<space-station>"]}, 使用"!ss"指令查看可用空间站.')

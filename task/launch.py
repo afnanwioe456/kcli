@@ -13,25 +13,24 @@ if TYPE_CHECKING:
 class Launch(Task):
     payload_type = []  # 可以搭载的载荷
     rocket_name = "Undefined"
-    payload_name = "Undefined"
 
     def __init__(self,
-                 tasks: Tasks,
                  spacecraft: Spacecraft,
-                 payload_name: str = "Relay",
+                 tasks: Tasks,
+                 start_time: int = -1,
+                 duration: int = 3600,
+                 importance: int = 3,
+                 payload: str = "Relay",
                  crew_name_list: None | list = None,
                  path_index: int = 2,
                  pe_altitude: float = 200000,
                  ap_altitude: float = 250000,
                  inclination: float = 19.61,
-                 start_time: int = -1,
-                 duration: int = 3600,
-                 importance: int = 3,
                  autostage: bool = True,
                  ):
         super().__init__(spacecraft, tasks, start_time, duration, importance)
 
-        self.payload_name = payload_name
+        self.payload = payload
         if crew_name_list is None:
             self.crew_name_list = []
         else:
@@ -43,15 +42,13 @@ class Launch(Task):
         self.inclination = inclination
         self.inc_desired = None
         self.ap_altitude = ap_altitude
-        self.autostage = autostage
-
-        self.time_out = 3600
+        self.autostage = True
 
     @property
     def description(self):
         return (
             f'{self.name} -> 发射\n'
-            f'\t运载火箭: {self.rocket_name} 载荷: {self.payload_name}\n'
+            f'\t运载火箭: {self.rocket_name} 载荷: {self.payload}\n'
             f'\t近拱点: {self.pe_altitude / 1000}km 远拱点: {self.ap_altitude / 1000}km\n'
             f'\t倾角: {self.inclination}\n'
             f'\t预计点火时: {sec_to_date(self.start_time)}')
@@ -98,7 +95,7 @@ class Launch(Task):
             if sc is None:
                 return
             LOGGER.debug(f'{self.name}: rolling out')
-            sc.launch_vessel('VAB', f'{self.rocket_name}_{self.payload_name}', 'LaunchPad', True, [])
+            sc.launch_vessel('VAB', f'{self.rocket_name}_{self.payload}', 'LaunchPad', True, [])
             sc.active_vessel.name = self.name
 
     @logging_around
@@ -128,21 +125,51 @@ class Launch(Task):
             new_task.append(inc_mnv)
         self.tasks.submit_nowait(new_task)
 
+    def _to_dict(self):
+        dic = {
+            'payload': self.payload,
+            'crew_name_list': self.crew_name_list,
+            'path_index': self.path_index,
+            'pe_altitude': self.pe_altitude,
+            'ap_altitude': self.ap_altitude,
+            'inclination': self.inclination,
+            'autostage': self.autostage,
+        }
+        return super()._to_dict() | dic
+
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            tasks = tasks,
+            start_time = data['start_time'],
+            duration = data['duration'],
+            importance = data['importance'],
+            payload = data['payload'],
+            crew_name_list = data['crew_name_list'],
+            path_index = data['path_index'],
+            pe_altitude = data['pe_altitude'],
+            ap_altitude = data['ap_altitude'],
+            inclination = data['inclination'],
+            autostage = data['autostage'],
+        )
+
 
 class Soyuz2Launch(Launch):
     payload_type = ['Relay', 'Soyuz_spacecraft']
     rocket_name = 'Soyuz_2'
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         
 
 class Ariane5ECALaunch(Launch):
     payload_type = ['Relay']
     rocket_name = 'Ariane_5_ECA'
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def _submit_next_task(self):
         from .maneuver import SimpleMnv
@@ -166,8 +193,8 @@ class LongMarch7Launch(Launch):
     payload_type = ['Relay']
     rocket_name = 'LongMarch_7'
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 LAUNCH_ROCKET_DIC: dict[str, Type[Launch]] = {

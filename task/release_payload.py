@@ -48,7 +48,7 @@ class ReleasePayload(Task):
         self.vessel.name = vessel_namer(f'{self.name}_tmp')
         # 分级，释放第一个载荷会自动切换到载荷上
         self.vessel.control.activate_next_stage()
-        LOGGER.debug(f'释放载荷：{self.vessel.name}')
+        LOGGER.debug(f'释放载荷: {self.vessel.name}')
         self.count -= 1
         adapter_name = self.vessel.name
         # 将active_vessel切换到释放的载具上并命名
@@ -75,13 +75,31 @@ class ReleasePayload(Task):
             for p in new_payloads:
                 p.name = vessel_namer(self.original_name)
                 self._deploy(p, 3)
-                LOGGER.debug(f'释放载荷：{p.name}')
+                LOGGER.debug(f'释放载荷: {p.name}')
             sleep(5)
             self.count -= 1
 
         self.vessel.type = VesselType.debris
         self.vessel.name += ' Debris'
         self.conn.close()
+
+    def _to_dict(self):
+        dic = {
+            'count': self.count,
+        }
+        return super()._to_dict() | dic
+    
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            tasks = tasks,
+            start_time = data['start_time'],
+            duration = data['duration'],
+            importance = data['importance'],
+            count = data['count'],
+        )
 
 
 def deploy_solar_panels(vessel: Vessel):

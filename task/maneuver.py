@@ -21,8 +21,8 @@ class SimpleMnv(Task):
                  target: u.Quantity,
                  start_time: float = -1,
                  duration: int = 300,
-                 tol: float = 0.1,
                  importance: int = 3,
+                 tol: float = 0.1,
                  ):
         """进行一次简单的轨道机动
 
@@ -70,6 +70,29 @@ class SimpleMnv(Task):
         self.tasks.submit_nowait(task_list)
         self.conn.close()
 
+    def _to_dict(self):
+        dic = {
+            'mode': self.mode,
+            'target': self.target.to_value(u.deg) if self.mode == 'inc' else self.target.to_value(u.km),
+            'tol': self.tol,
+        }
+        return super()._to_dict() | dic
+
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        mode = data['mode']
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            tasks = tasks,
+            mode = mode,
+            target = data['target'] * u.deg if mode == 'inc' else data['target'] * u.km,
+            start_time = data['start_time'],
+            duration = data['duration'],
+            importance = data['importance'],
+            tol = data['tol'],
+        )
+
 
 class ExecuteNode(Task):
     def __init__(self, 
@@ -77,8 +100,9 @@ class ExecuteNode(Task):
                  tasks: Tasks, 
                  start_time: float, 
                  duration: int, 
+                 importance: int = 7,
                  tol: float = 0.1, 
-                 importance: int = 7):
+                 ):
         """执行最近的一个节点"""
         super().__init__(spacecraft, tasks, start_time, duration, importance)
         self.tol = tol
@@ -106,3 +130,21 @@ class ExecuteNode(Task):
         """执行节点"""
         # TODO: duration
         return ExecuteNode(spacecraft, tasks, node.ut - 900, 1800, tol, importance)
+
+    def _to_dict(self):
+        dic = {
+            'tol': self.tol,
+        }
+        return super()._to_dict() | dic
+    
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            tasks = tasks,
+            start_time = data['start_time'],
+            duration = data['duration'],
+            importance = data['importance'],
+            tol = data['tol'],
+        )
