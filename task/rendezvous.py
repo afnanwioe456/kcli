@@ -38,6 +38,9 @@ class Rendezvous(Task):
     def start(self):
         if not self._conn_setup():
             return
+        # 非常奇怪的情况: 如果不先锁定目标再计算KSP就会有很大的误差
+        # 问题似乎发生在部署机动节点的瞬间
+        self.sc.target_vessel = self.spacestation.vessel
         ss_orb = Orbit.from_krpcv(self.spacestation.vessel)
         v_orb = Orbit.from_krpcv(self.vessel)
         mnv = Maneuver.opt_bi_impulse_rdv(v_orb, ss_orb)
@@ -47,6 +50,7 @@ class Rendezvous(Task):
             task = ExecuteNode.from_node(self.spacecraft, n, self.tasks, importance=8)
             next_task.append(task)
         self.tasks.submit_nowait(next_task)
+        self.conn.close()
         
     def _to_dict(self):
         dic = {

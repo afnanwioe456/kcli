@@ -12,15 +12,17 @@ if TYPE_CHECKING:
 
 def orbit_launch_window(orbit: Orbit, 
                         site_position: np.ndarray, 
-                        direction, 
-                        cloest,
-                        min_phase, 
-                        max_phase,
-                        start_period, 
-                        end_period):
+                        direction: str, 
+                        cloest: bool,
+                        min_phase: u.Quantity, 
+                        max_phase: u.Quantity,
+                        start_time: u.Quantity, 
+                        end_time: u.Quantity):
     """
     发射到target轨道面的发射窗口
     """
+    if start_time > end_time or end_time < orbit.epoch:
+        raise ValueError()
     period = orbit.attractor.rotational_period.to_value(u.s)
     # 获得目标轨道面的法向量
     target_position = orbit.r_vec.to_value(u.km)
@@ -57,11 +59,18 @@ def orbit_launch_window(orbit: Orbit,
         return min(result_launch_window) * u.s
 
     # 计算最佳发射窗口
+    min_phase = min_phase.to_value(u.deg)
+    max_phase = max_phase.to_value(u.deg)
+    start_time = start_time.to_value(u.s)
+    end_time = end_time.to_value(u.s)
     best_phase_angle = np.inf
     best_launch_window = result_launch_window[0]
     for i in list(range(len(result_launch_window))):
         launch_window_position = np.array([float(result_value[i][0]), float(result_value[i][1]), z])
-        for n in range(start_period, end_period):
+        start_period = (start_time - result_launch_window[i]) // period + 1
+        start_time = max(start_time, 0)
+        end_period = (end_time - result_launch_window[i]) // period
+        for n in range(int(start_period), int(end_period)):
             launch_window = result_launch_window[i] + n * period
             target_position = orbit.propagate_to_epoch(launch_window * u.s).r_vec.to_value(u.km)
             phase_angle = np.degrees(angle_between_vectors(launch_window_position, target_position))

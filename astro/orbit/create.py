@@ -216,24 +216,37 @@ class Orbit(OrbitBase):
                       site_p: np.ndarray, 
                       direction: str = 'SE', 
                       cloest: bool = False, 
-                      min_phase: float = 10, 
-                      max_phase: float = 30,
-                      start_period: int = 0, 
-                      end_period: int = 90) -> u.Quantity:
+                      min_phase: u.Quantity = 10 * u.deg, 
+                      max_phase: u.Quantity = 30 * u.deg,
+                      start_time: u.Quantity = None, 
+                      end_time: u.Quantity = None) -> u.Quantity:
         """发射场向轨道发射的时刻
 
         Args:
             site_p (ndarray): 发射场位置矢量, 惯性系
             direction (str): 发射方向. Defaults to 'SE'.
             cloest (bool): 返回最近的窗口. Defaults to False.
-            min_phase (int, optional): 最小相位差. Defaults to 40.
-            start_period (int, optional): 开始周期. Defaults to 0.
-            end_period (int, optional): 结束周期. Defaults to 30.
+            min_phase (int, optional): 最小相位差. Defaults to 10.
+            max_phase (int, optional): 最大相位差. Defaults to 30.
+            start_time (Quantity, optional): 搜索开始时间. Defaults to None.
+            end_time (Quantity, optional): 搜索终止时间. Defaults to None.
 
         Returns:
             float: 发射窗口
         """
-        ut = orbit_launch_window(self, site_p, direction, cloest, min_phase, max_phase, start_period, end_period)
+        if start_time is None or end_time is None:
+            start_time = self.epoch
+            end_time = self.epoch + KSP_Earth.rotational_period * 30
+        ut = orbit_launch_window(
+            self, 
+            site_p, 
+            direction, 
+            cloest, 
+            min_phase, 
+            max_phase, 
+            start_time, 
+            end_time
+            )
         return ut
 
     def cheat(self, ut=None):

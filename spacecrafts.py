@@ -1,5 +1,7 @@
 from __future__ import annotations
 from functools import cached_property
+from typing import final
+import threading
 import numpy as np
 from astropy import units as u
 
@@ -31,6 +33,7 @@ class SpacecraftBase:
         tail += 1
         return f'{name} #{tail}', tail
 
+    @final
     @classmethod
     def get(cls, name) -> SpacecraftBase:
         return cls._spacecraft_dic.get(name, None)
@@ -44,6 +47,37 @@ class SpacecraftBase:
         if not v:
             raise RuntimeError(f'{self.name} does not exist')
         return v
+
+    @property
+    def main_engine(self):
+        ret = []
+        flag = False
+        engines = get_parts_in_stage_by_type(self.vessel, 'engine', self.vessel.control.current_stage)
+        for e in engines:
+            if 'main' in e.tag.split():
+                flag = True
+                ret.append(e)
+        if not flag:
+            ret = engines
+        return ret
+        
+    @main_engine.setter
+    def main_engine(self, value):
+        if not isinstance(value, bool):
+            raise ValueError(f"Value must be bool, got {type(value).__name__}")
+        for e in self.main_engine:
+            e.engine.active = value
+
+    @property
+    def rcs(self):
+        return get_parts_in_stage_by_type(self.vessel, 'rcs', self.vessel.control.current_stage)
+    
+    @rcs.setter
+    def rcs(self, value):
+        if not isinstance(value, bool):
+            raise ValueError(f"Value must be bool, got {type(value).__name__}")
+        for e in self.rcs:
+            e.rcs.enabled = value
 
     def _to_dict(self):
         return {
@@ -80,41 +114,20 @@ class Spacecraft(SpacecraftBase):
     def __init__(self, name: str):
         super().__init__(name)
 
-    @property
-    def main_engine(self):
-        ret = []
-        flag = False
-        engines = get_parts_in_stage_by_type(self.vessel, 'engine', self.vessel.control.current_stage)
-        for e in engines:
-            if 'main' in e.tag.split():
-                flag = True
-                ret.append(e)
-        if not flag:
-            ret = engines
-        return ret
-        
-    @main_engine.setter
-    def main_engine(self, value):
-        if not isinstance(value, bool):
-            raise ValueError(f"Value must be bool, got {type(value).__name__}")
-        for e in self.main_engine:
-            e.engine.active = value
-
-    @property
-    def rcs(self):
-        return get_parts_in_stage_by_type(self.vessel, 'rcs', self.vessel.control.current_stage)
-    
-    @rcs.setter
-    def rcs(self, value):
-        if not isinstance(value, bool):
-            raise ValueError(f"Value must be bool, got {type(value).__name__}")
-        for e in self.rcs:
-            e.rcs.active = value
-
 
 class SpaceStation(SpacecraftBase):
     _crew_mission_count = 0
     _supply_mission_count = 0
+    _last_mission_end_time = 0 * u.s
+    _instances = {}
+    _new_lock = threading.Lock()
+
+    def __new__(cls):
+        if cls not in cls._instances:
+            with cls._new_lock:
+                if cls not in cls._instances:
+                    cls._instances[cls] = super().__new__(cls)
+        return cls._instances[cls]
 
     def __init__(self, name: str):
         super().__init__(name)
@@ -179,6 +192,7 @@ class SpaceStation(SpacecraftBase):
         '_crew_mission_count': self._crew_mission_count,
         '_supply_mission_count': self._supply_mission_count,
         '_docking_ports': [dp._to_dict() for dp in self._docking_ports],
+        '_last_mission_end_time': self._last_mission_end_time.to_value(u.s),
         }
         return super()._to_dict() | dic
 
@@ -189,6 +203,7 @@ class SpaceStation(SpacecraftBase):
         ret._tail = data['_tail']
         ret._crew_mission_count = data['_crew_mission_count']
         ret._supply_mission_count = data['_supply_mission_count']
+        ret._last_mission_end_time = data['_last_mission_end_time'] * u.s
         ret._docking_ports = [DockingPortStatus._from_dict(d) for d in data['_docking_ports']]
         return ret
         
@@ -196,8 +211,9 @@ class SpaceStation(SpacecraftBase):
 class KerbalSpaceStation(SpaceStation):
     _insert_orbit = (240000, 240000)
     _launch_lead_time = 360
-    _min_phase_diff = 10
-    _max_phase_diff = 40
+    _min_phase_diff = 10 * u.deg
+    _max_phase_diff = 40 * u.deg
+    _time_between_missions = 90 * u.d
 
     def __init__(self, *args, **kwargs):
         super().__init__('KSS')
@@ -215,7 +231,6 @@ class KerbalSpaceStation(SpaceStation):
         return self._invoke_mission(tasks, 'supply')
 
     def _invoke_mission(self, tasks: Tasks, mission_type: str):
-        # TODO: 重复创建任务冲突问题
         if mission_type == 'crew':
             self._crew_mission_count += 1
             counter = self._crew_mission_count
@@ -226,11 +241,17 @@ class KerbalSpaceStation(SpaceStation):
             raise ValueError(mission_type)
         site_p = get_launch_site_position()
         orb = Orbit.from_krpcv(self.vessel)
+        if self._last_mission_end_time < orb.epoch:
+            self._last_mission_end_time = orb.epoch
+        end_time = self._last_mission_end_time + self._time_between_missions
         launch_window = Orbit.launch_window(orb, 
                                             site_p, 
-                                            'SE', 
+                                            direction='SE', 
                                             min_phase=self._min_phase_diff, 
-                                            max_phase=self._max_phase_diff)
+                                            max_phase=self._max_phase_diff,
+                                            start_time=self._last_mission_end_time,
+                                            end_time=end_time)
+        self._last_mission_end_time = end_time
         launch_window = launch_window.to_value(u.s)
         inc = -np.degrees(self.vessel.orbit.inclination)
 
@@ -256,8 +277,9 @@ class KerbalSpaceStation(SpaceStation):
         deorbit_alt = 50000
         from .task.maneuver import SimpleMnv
         from .task.docking import Undocking
+        s = docking_port.docked_with
         undocking_task = Undocking(self, docking_port, tasks)
-        mnv_plan_task = SimpleMnv(docking_port.docked_with, tasks, 'pe', deorbit_alt * u.m, importance=0)
+        mnv_plan_task = SimpleMnv(s, tasks, 'pe', deorbit_alt * u.m, importance=0)
         # TODO: 回收
         return [undocking_task, mnv_plan_task]
 
@@ -284,7 +306,10 @@ class DockingPortStatus:
         return SpacecraftBase.get(self._docked_with)
 
     @docked_with.setter
-    def docked_with(self, spacecraft: SpacecraftBase):
+    def docked_with(self, spacecraft: SpacecraftBase | None):
+        if spacecraft is None:
+            self._docked_with = None
+            return
         self._docked_with = spacecraft.name
 
     def is_free(self):

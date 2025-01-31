@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
+from scipy.optimize import linprog
 from time import sleep
 from krpc.services.spacecenter import SASMode
 from .utils import *
@@ -22,12 +23,17 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
     pid_d = PIDVController(Kp, Ki, Kd)
     prev_time = sc.ut
     stable = 0
+    step = 0
 
     sc.target_vessel = target
     vessel.control.sas = True
+    sleep(0.1)
     vessel.control.sas_mode = SASMode.target
+    sleep(3)
+    balance_rcs(vessel)
     while True:
         sleep(rate)
+        step += 1
         cur_time = sc.ut
         dt = cur_time - prev_time
         prev_time = cur_time
@@ -54,5 +60,32 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
             stable += 1
         else:
             stable = 0
+        if step % 100 == 0:
+            balance_rcs(vessel)
     vessel.control.sas = False
+
             
+def balance_rcs(v: Vessel):
+    force = []
+    torque = []
+    for p in v.parts.rcs:
+        p_force = p.available_force
+        p_torque = p.available_torque
+        force.append(p_force[0] + tuple(-x for x in p_force[1]))
+        torque.append(tuple(x1 + x2 for x1, x2 in zip(p_torque[0], p_torque[1])))
+    force = np.where(np.abs(force) < 0.1, 0, force)
+    torque = np.where(np.abs(torque) < 0.01, 0, torque)
+    force = np.maximum(np.array(force).T, 0.)
+    torque = np.array(torque).T
+    eq = np.zeros(torque.shape[0])
+    c = -np.ones(force.shape[1])
+    control = np.zeros(force.shape[1])
+    for d in range(force.shape[0]):
+        # for each (6) thrust direction
+        bounds = [(0, max_t) for max_t in force[d]]
+        result = linprog(c, A_eq=torque, b_eq=eq, bounds=bounds, method='highs')
+        limit = np.array([t for _, t in enumerate(result.x)])
+        limit /= max(limit)
+        control = np.maximum(control, limit)
+    for p, c in zip(v.parts.rcs, control):
+        p.thrust_limit = c

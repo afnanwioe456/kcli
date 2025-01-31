@@ -10,7 +10,7 @@ import krpc.services
 if TYPE_CHECKING:
     from krpc.services.spacecenter import Vessel, Part
 
-_DEBUG_MODE = True
+_DEBUG_MODE = False
 KSP_EPOCH_TIME = -599616000
 LAUNCH_SITES_COORDS = {
     'wenchang': (19.613726150307052, 110.9553275138089)

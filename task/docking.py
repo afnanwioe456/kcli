@@ -27,6 +27,7 @@ def docking_with_target(conn: Client, ss: SpaceStation, docking_port: DockingPor
     sc.target_docking_port = docking_port.part
 
     docking = mj.docking_autopilot
+    docking.speed_limit = 10
     docking.enabled = True
 
     while docking.enabled:
@@ -60,15 +61,13 @@ class Docking(Task):
             return
         if not self._conn_setup():
             return False
-        # TODO: 主引擎与RCS控制
         dis = 50
-        self.vessel.control.rcs = True
+        self.spacecraft.rcs = True
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} getting closer: {dis}')
         get_closer(dis, self.vessel, self.spacestation.vessel)
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking')
         docking_with_target(self.conn, self.spacestation, self.docking_port)
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking completed')
-        self.vessel.control.rcs = False
         self.conn.close()
     
     def _to_dict(self):
@@ -120,7 +119,7 @@ class Undocking(Task):
         v = s.vessel
         self.conn.space_center.active_vessel = v
         v.control.rcs = True
-        v.control.forward = -0.1
+        v.control.forward = -0.5
         sleep(5)
         v.control.forward = 0
         v.control.rcs = False
