@@ -19,13 +19,13 @@ LAUNCH_SITES_COORDS = {
 ### LOGGER ###
 
 def setup_logger():
-    logger = logging.getLogger("krpclive")
+    logger = logging.getLogger("kcli")
     logger.setLevel(logging.DEBUG)
 
-    file_handler = logging.FileHandler("krpc_live/.live/log.txt", encoding="utf-8")
+    file_handler = logging.FileHandler("kcli/.live/log.txt", encoding="utf-8")
     file_handler.setLevel(logging.INFO)
 
-    debug_file_handler = logging.FileHandler("krpc_live/.live/debug.log", encoding="utf-8")
+    debug_file_handler = logging.FileHandler("kcli/.live/debug.log", encoding="utf-8")
     debug_file_handler.setLevel(logging.DEBUG)
 
     console_handler = logging.StreamHandler()
@@ -125,6 +125,10 @@ def get_launch_site_position(site: str = 'wenchang'):
     site_p = body.surface_position(la, lo, body.non_rotating_reference_frame)
     site_p = (site_p[0], site_p[2], site_p[1])
     return site_p
+
+def dummy_roll_out():
+    sc = UTIL_CONN.space_center
+    sc.launch_vessel('VAB', 'dummy', 'LaunchPad', True, [])
 
 ### VESSEL.NAME ###
 

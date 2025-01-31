@@ -85,6 +85,8 @@ def balance_rcs(v: Vessel):
         bounds = [(0, max_t) for max_t in force[d]]
         result = linprog(c, A_eq=torque, b_eq=eq, bounds=bounds, method='highs')
         limit = np.array([t for _, t in enumerate(result.x)])
+        if max(limit) < 0.1:
+            return
         limit /= max(limit)
         control = np.maximum(control, limit)
     for p, c in zip(v.parts.rcs, control):

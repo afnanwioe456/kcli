@@ -210,6 +210,7 @@ class SpaceStation(SpacecraftBase):
 
 class KerbalSpaceStation(SpaceStation):
     _insert_orbit = (240000, 240000)
+    _deorbit_alt = 50000
     _launch_lead_time = 360
     _min_phase_diff = 10 * u.deg
     _max_phase_diff = 40 * u.deg
@@ -274,17 +275,24 @@ class KerbalSpaceStation(SpaceStation):
         return [launch_task, rdv_task, dock_task]
 
     def _crew_return_mission(self, docking_port: DockingPortStatus, tasks: Tasks) -> list[Task]:
-        deorbit_alt = 50000
         from .task.maneuver import SimpleMnv
         from .task.docking import Undocking
+        from .task.landing import GlideLanding
         s = docking_port.docked_with
         undocking_task = Undocking(self, docking_port, tasks)
-        mnv_plan_task = SimpleMnv(s, tasks, 'pe', deorbit_alt * u.m, importance=0)
-        # TODO: 回收
-        return [undocking_task, mnv_plan_task]
+        mnv_plan_task = SimpleMnv(s, tasks, 'pe', self._deorbit_alt * u.m, importance=0)
+        landing_task = GlideLanding(s, tasks)
+        return [undocking_task, mnv_plan_task, landing_task]
 
-    def _supply_return_mission(self, docking_port, tasks) -> list[Task]:
-        return self._crew_return_mission(docking_port, tasks)
+    def _supply_return_mission(self, docking_port: DockingPortStatus, tasks: Tasks) -> list[Task]:
+        from .task.maneuver import SimpleMnv
+        from .task.docking import Undocking
+        from .task.landing import ControlledReentry
+        s = docking_port.docked_with
+        undocking_task = Undocking(self, docking_port, tasks)
+        mnv_plan_task = SimpleMnv(s, tasks, 'pe', self._deorbit_alt * u.m, importance=0)
+        reentry_task = ControlledReentry(s, tasks)
+        return [undocking_task, mnv_plan_task, reentry_task]
         
 
 class DockingPortStatus:

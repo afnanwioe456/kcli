@@ -57,7 +57,9 @@ class Docking(Task):
         if self.docking_port.is_docked():
             LOGGER.debug(f'{self.spacestation} docking port [{self.docking_port.num}] is docked with {self.docking_port.docked_with},'
                          f'initializing return task.')
-            self.tasks.submit_nowait(self.docking_port.spacecraft.return_mission(self.docking_port, self.tasks) + [self])
+            ss: SpaceStation = self.docking_port.spacecraft
+            return_tasks = ss.return_mission(self.docking_port, self.tasks)
+            self.tasks.submit_nowait(return_tasks[:-2] + [self] + return_tasks[-2:])
             return
         if not self._conn_setup():
             return False
