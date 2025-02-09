@@ -31,7 +31,7 @@ class GlideLanding(Task):
     @property
     def description(self):
         return (f'{self.name} -> 无动力着陆'
-                f'  预计执行时: {sec_to_date(self.start_time)}')
+                f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
     def start(self):

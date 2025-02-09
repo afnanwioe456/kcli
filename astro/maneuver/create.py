@@ -168,8 +168,9 @@ class Maneuver:
         """
         dt = revisit_epoch - orb.epoch
         M = dt // orb.period
-        if M >= 50:  # 周期数过多可能导致机动过小
-            revisit_epoch = orb.epoch + 50 * orb.period + dt % orb.period
+        threshold = 20
+        if M >= threshold:  # 周期数过多可能导致机动过小
+            revisit_epoch = orb.epoch + threshold * orb.period + dt % orb.period
             conserved = True
         mnvs: list[Maneuver] = []
         inner_imps = change_phase_planner(orb, revisit_epoch, True, conserved)
@@ -233,6 +234,13 @@ class Maneuver:
         return opt_lambert_revolution(orbit_v, orbit_t)
 
     @classmethod
+    def course_correction(cls, orb_v: Orbit, orb_t: Orbit, dt=5*u.min):
+        orb_mnv_start = orb_v
+        orb_mnv_end = orb_t.propagate(-dt)
+        mnv = Maneuver.lambert(orb_mnv_start, orb_mnv_end)
+        return mnv
+        
+    @classmethod
     def moon_transfer_target(cls, 
                              orb_v: Orbit, 
                              moon: Body, 
@@ -253,8 +261,7 @@ class Maneuver:
         Returns:
             Orbit: 转移瞄准轨道
         """
-        rp_m = pe + moon.r
-        orb_target = transfer_target(orb_v, moon, cap_t, rp_m, inc, relative)
+        orb_target = transfer_target(orb_v, moon, cap_t, pe, inc, relative)
         orb_transfer = orb_target.propagate_to_nu(0*u.rad, True, -1)
         if orb_transfer.epoch < orb_v.epoch:
             cap_t += orb_v.epoch - orb_transfer.epoch + 600 * u.s
@@ -274,6 +281,7 @@ class Maneuver:
         Returns:
             Orbit: 瞄准轨道
         """
+        # 瞄准捕获时间当前只是开始搜索时间, 因此如果瞄准时间大于最近的窗口, 可能会错过较近的窗口
         orb_target = transfer_orbit_target(orb_v, orb_t, cap_t)
         orb_transfer = orb_target.propagate_to_nu(0*u.rad, True, -1)
         if orb_transfer.epoch < orb_v.epoch:
@@ -283,8 +291,27 @@ class Maneuver:
         return orb_target
 
     @classmethod
-    def moon_transfer(cls, orb_v: Orbit, orb_t: Orbit):
-        """卫星转移机动: 
+    def moon_return_target(cls, orb_v: Orbit, pe: u.Quantity, esc_t: u.Quantity):
+        """从卫星返回行星指定近星点高度的瞄准轨道, 位于逃逸临界前
+
+        Args:
+            orb_v (Orbit): 航天器轨道
+            pe (Quantity): 近星点高度
+        esc_t (Quantity): 瞄准逃逸时间
+
+        Returns:
+            Orbit: 瞄准轨道
+        """
+        orb_target = return_target(orb_v, pe, esc_t)
+        orb_transfer = orb_target.propagate_to_nu(0 * u.rad, True, -1)
+        if orb_transfer.epoch < orb_v.epoch:
+            esc_t += orb_v.epoch - orb_transfer.epoch + 600 * u.s
+            warnings.warn(f'orbit already passed transfer window, trying capture time {esc_t}', RuntimeWarning)
+            return cls.moon_return_target(orb_v, pe, esc_t)
+
+    @classmethod
+    def transfer(cls, orb_v: Orbit, orb_t: Orbit):
+        """轨道转移机动: 
 
         Args:
             orb_v (Orbit): 航天器轨道
@@ -305,10 +332,3 @@ class Maneuver:
         mnv_transfer = Maneuver.lambert(orb_start, orb_t.propagate(-5 * u.min))
         mnv_series = mnv_coplanar.merge(mnv_phase).merge(mnv_transfer)
         return mnv_series
-
-    @classmethod
-    def course_correction(cls, orb_v: Orbit, orb_t: Orbit, dt=5*u.min):
-        orb_mnv_start = orb_v
-        orb_mnv_end = orb_t.propagate(-dt)
-        mnv = Maneuver.lambert(orb_mnv_start, orb_mnv_end)
-        return mnv

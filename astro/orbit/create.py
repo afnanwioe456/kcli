@@ -83,7 +83,7 @@ class Orbit(OrbitBase):
         return orb
 
     @u.quantity_input(r=u.km)
-    def propagate_to_r(self, r, sign=True):
+    def propagate_to_r(self, r, sign=True, prograde=True, M=0):
         nu = r2nu(
             r.to_value(u.km),
             self.h.to_value(u.km ** 2 / u.s),
@@ -91,7 +91,7 @@ class Orbit(OrbitBase):
             self.attractor.k.to_value(u.km ** 3 / u.s ** 2),
             sign
         ) * u.rad
-        return self.propagate_to_nu(nu)
+        return self.propagate_to_nu(nu, prograde, M)
 
     @u.quantity_input(nu=u.s)
     def is_safe_before(self, epoch):
