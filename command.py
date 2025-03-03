@@ -20,10 +20,11 @@ Usage:
 
 Options:
     -h --help               查看发射任务指令帮助.
+    -b --body <b>           目标天体, 使用"!bodies"指令查看详情. [default: earth]
     -n --name <n>           载荷名称.
     -r --rocket <r>         运载火箭, 使用"!rkt"指令查看详情. [default: soyuz2]
     -p --payload <p>        载荷, 使用"!payload"指令查看详情. [default: r]
-    -o --orbit <o>          圆轨道高度, 启用此参数将覆盖近/远拱点参数.
+    -c --circular <o>       圆轨道高度, 启用此参数将覆盖近/远拱点参数.
     -a --apoapsis <ap>      远拱点(km).
     -e --periapsis <pe>     近拱点(km).
     -i --inclination <i>    倾角(deg). [default: 45]
@@ -31,13 +32,14 @@ Options:
     -t --time <t>           点火时(请用"T"替换空格, 支持大多数时间格式,
                             如19510107T105859, 或10:58:59(当天)).
     -m --elements           使用轨道根数确定目标轨道,
-                            半长轴(km), 离心率(1), 倾角(deg), 升交点赤经(deg), 近地点辐角(deg), 真近点角(deg).
+                            半长轴(km), 离心率(1), 倾角(deg), 
+                            升交点赤经(deg), 近地点辐角(deg), 真近点角(deg).
 """
 
 SS_DOC = f"""
 Usage:
     ! <space-station> -h
-    ! <space-station> (-c | -s) [options]
+    ! <space-station> (-c | -s)
 
 "!<space-station>"指令用于部署空间站任务, 使用"!ss"指令查看可用空间站详情.
 如: "!kss -c"(kss空间站乘员任务),
@@ -93,6 +95,8 @@ class ChatMsg:
 
 
 class Command:
+    _lastest_body_mission_dic = {}
+
     def __init__(self, msg: ChatMsg):
         self.tasks: Tasks | None = None
         self.importance = 0
@@ -103,7 +107,7 @@ class Command:
         """
         处理命令并返回生成的Tasks
         """
-        command_args = self.msg.chat_text[1:].lower().split()
+        command_args = self.msg.chat_text[1:].split()
         command_type = command_args[0]
         if command_type in ['rocket', 'rkt']:
             # TODO:
@@ -152,25 +156,24 @@ class Command:
             LOGGER.warning(f'@{self.msg.user_id} {rocket}不能搭载{payload}, 使用“!rocket”指令查看运载火箭可用载荷.')
             return
 
-        pe, ap, o = args['--periapsis'], args['--apoapsis'], args['--orbit']
+        pe, ap, c = args['--periapsis'], args['--apoapsis'], args['--circular']
         if ap and pe:
             ap = float(ap) * 1000.0
             pe = float(pe) * 1000.0
         elif ap:
             ap = float(ap) * 1000.0
             pe = 200000.0
-        elif o:
-            ap, pe = float(o) * 1000.0, float(o) * 1000.0
+        elif c:
+            ap, pe = float(c) * 1000.0, float(c) * 1000.0
         else:
             ap, pe = 250000.0, 200000.0
-        # TODO: 如果pe大于一定高度的话，submit发射+变轨
         # TODO: 轨道根数发射
         ap, pe = max(ap, pe), min(ap, pe)
         ap, pe = max(ap, 200000.0), max(pe, 200000.0)
 
         inc = args['--inclination']
         priority = args['--priority']
-        start_time = date_to_sec(args['--time']) if args['--time'] else -1
+        start_time = date_to_sec(args['--time']) if args['--time'] else -1 * u.s
 
         self.tasks = Tasks(self.msg)
         self.tasks.submit(executor(

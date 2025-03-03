@@ -14,11 +14,6 @@ if TYPE_CHECKING:
     from krpc.services.spacecenter import Vessel, Orbit as KRPCOrbit
 
 
-ATTRACTOR_DIC = {
-    'Earth': KSP_Earth,
-    'Moon': KSP_Moon,
-}
-
 class Orbit(OrbitBase):
     @u.quantity_input(t=u.s)
     def propagate(self, t, tol=1e-8, max_iter=100):
@@ -190,26 +185,26 @@ class Orbit(OrbitBase):
 
 
     @classmethod
-    def from_krpcorb(cls, orbit: KRPCOrbit, ut=None):
+    def from_krpcorb(cls, orbit: KRPCOrbit, ut: u.Quantity | None = None):
         """从krpc Orbit对象创建Orbit对象
 
         Args:
             orbit (Orbit): krpc Orbit
             ut (Quantity | None): epoch
         """
-        ut = get_ut() if ut is None else ut.to_value(u.s)
-        nu = orbit.true_anomaly_at_ut(ut)
+        ut = get_ut() if ut is None else ut
+        nu = orbit.true_anomaly_at_ut(ut.to_value(u.s))
         if nu < 0:
             nu += 2 * np.pi
         return cls.from_coe(
-            ATTRACTOR_DIC[orbit.body.name],
+            BODY_DIC[orbit.body.name],
             orbit.semi_major_axis * u.m,
             orbit.eccentricity * u.one,
             orbit.inclination * u.rad,
             orbit.longitude_of_ascending_node * u.rad,
             orbit.argument_of_periapsis * u.rad,
             nu * u.rad,
-            ut * u.s,
+            ut,
         )
 
     def launch_window(self, 
@@ -251,7 +246,7 @@ class Orbit(OrbitBase):
 
     def cheat(self, ut=None):
         if ut is None:
-            ut = get_ut() * u.s
+            ut = get_ut()
         orb = self.propagate_to_epoch(ut)
         nu = orb.nu.to_value(u.rad)
         e = orb.e.to_value(u.one)
@@ -263,4 +258,31 @@ class Orbit(OrbitBase):
                 f'MNA: {Me}\n'
                 f'LAN: {orb.raan.to_value(u.deg)}\n'
                 f'ARG: {orb.argp.to_value(u.deg)}')
+
+    def _to_dict(self):
+        return {
+            'attractor': self.attractor.name,
+            'a': self.a.to_value(u.km),
+            'e': self.e.to_value(u.one),
+            'inc': self.inc.to_value(u.rad),
+            'raan': self.raan.to_value(u.rad),
+            'argp': self.argp.to_value(u.rad),
+            'nu': self.nu.to_value(u.rad),
+            'epoch': self.epoch.to_value(u.s),
+        }
+
+    @classmethod
+    def _from_dict(cls, data):
+        from ..body import BODY_DIC
+        return cls.from_coe(
+            attractor = BODY_DIC[data['attractor']],
+            a = data['a'] * u.km,
+            e = data['e'] * u.one,
+            inc = data['inc'] * u.rad,
+            raan = data['raan'] * u.rad,
+            argp = data['argp'] * u.rad,
+            nu = data['nu'] * u.rad,
+            epoch = data['epoch'] * u.s,
+        )
+        
         

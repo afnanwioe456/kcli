@@ -1,6 +1,7 @@
 from __future__ import annotations
 from time import sleep
 from krpc.services.spacecenter import Vessel, VesselType
+from astropy import units as u
 
 from .tasks import Task
 from ..utils import *
@@ -18,8 +19,8 @@ class ReleasePayload(Task):
     def __init__(self,
                  spacecraft: Spacecraft,
                  tasks: Tasks,
-                 start_time: int = -1,
-                 duration: int = 180,
+                 start_time: u.Quantity = -1 * u.s,
+                 duration: u.Quantity = 180 * u.s,
                  importance: int = 0,
                  count: int = 1,  # 待分离的载荷数
                  ):
@@ -99,8 +100,8 @@ class ReleasePayload(Task):
         return cls(
             spacecraft = SpacecraftBase.get(data['spacecraft_name']),
             tasks = tasks,
-            start_time = data['start_time'],
-            duration = data['duration'],
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
             importance = data['importance'],
             count = data['count'],
         )

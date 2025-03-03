@@ -1,17 +1,20 @@
 from __future__ import annotations
 from time import sleep
 import krpc
+from astropy import units as u
 
 from .tasks import Task
 from ..utils import *
 
 if TYPE_CHECKING:
     from .tasks import Tasks
+    from ..astro.orbit import Orbit
     from ..spacecrafts import Spacecraft
 
 __all__ = [
     'Launch',
     'Soyuz2Launch',
+    'Ariane5ECALaunch',
     'LongMarch7Launch',
     'LAUNCH_ROCKET_DIC',
     'LAUNCH_PAYLOAD_DIC',
@@ -23,32 +26,37 @@ class Launch(Task):
 
     def __init__(self,
                  spacecraft: Spacecraft,
+                 orbit: Orbit,
                  tasks: Tasks,
-                 start_time: int = -1,
-                 duration: int = 3600,
+                 start_time: u.Quantity = -1 * u.s,
+                 duration: u.Quantity = 1800 * u.s,
                  importance: int = 3,
                  payload: str = "Relay",
-                 crew_name_list: None | list = None,
-                 path_index: int = 2,
-                 pe_altitude: float = 200000,
-                 ap_altitude: float = 250000,
-                 inclination: float = 19.61,
-                 autostage: bool = True,
+                 crew_name_list: None | list[str] = None,
+                 direction: str = 'SE',
                  ):
         super().__init__(spacecraft, tasks, start_time, duration, importance)
-
+        self.orbit = orbit
+        self.direction = direction
+        if self.start_time == -1 * u.s:
+            # 如果不严格按照传入的start_time发射, 就寻找最近的发射窗口发射到轨道面上
+            launch_window = self.orbit.launch_window(self.spacecraft.name, direction=self.direction, cloest=True)
+            # TODO
+            self.start_time = launch_window - 360 * u.s
         self.payload = payload
         if crew_name_list is None:
             self.crew_name_list = []
         else:
             self.crew_name_list = crew_name_list
-
-        self.path_index = path_index
-        self.pe_altitude = pe_altitude
+        self.pe_altitude = self.orbit.pe
         self.pe_desired = None
-        self.inclination = inclination
+        # TODO: 方向与倾角问题
+        if self.direction in ['SE', 'SW']:
+            self.inclination = -self.orbit.inc
+        else:
+            self.inclination = self.orbit.inc
         self.inc_desired = None
-        self.ap_altitude = ap_altitude
+        self.ap_altitude = self.orbit.ap
         self.autostage = True
 
     @property
@@ -56,8 +64,8 @@ class Launch(Task):
         return (
             f'{self.name} -> 发射\n'
             f'\t运载火箭: {self.rocket_name} 载荷: {self.payload}\n'
-            f'\t近拱点: {self.pe_altitude / 1000}km 远拱点: {self.ap_altitude / 1000}km\n'
-            f'\t倾角: {self.inclination}\n'
+            f'\t近拱点: {self.pe_altitude.to(u.km)} 远拱点: {self.ap_altitude.to(u.km)}\n'
+            f'\t倾角: {self.inclination.to(u.deg)}\n'
             f'\t预计点火时: {sec_to_date(self.start_time)}')
 
     def _conn_setup(self):
@@ -66,29 +74,24 @@ class Launch(Task):
             return False
         self.vessel.name = self.name
         self.autopilot = self.mj.ascent_autopilot
-        self.autopilot_path_index = self.path_index
-        if self.autopilot_path_index == 2:
-            self.pvg_ascent = self.autopilot.ascent_path_pvg
-        # TODO
         self.pvg_ascent = self.autopilot.ascent_path_pvg
 
         if self.ap_altitude == self.pe_altitude:
-            self.pe_altitude -= 100
-        if self.pe_altitude > 400000:
+            self.pe_altitude -= 100 * u.m
+        if self.pe_altitude > 400000 * u.m:
             self.pe_desired = self.pe_altitude
-            self.pe_altitude = 400000
-        if 19.61 > self.inclination > 0:
+            self.pe_altitude = 400000 * u.m
+        # TODO
+        if 19.61 * u.deg > self.inclination > 0 * u.deg:
             self.inc_desired = self.inclination
-            self.inclination = 19.61
-        elif -19.61 < self.inclination < 0:
-            self.inc_desired = self.inclination
-            self.inclination = -19.61
+            self.inclination = 19.61 * u.deg
+        elif -19.61 * u.deg < self.inclination < 0 * u.deg:
+            self.inc_desired = -self.inclination
+            self.inclination = -19.61 * u.deg
 
-        self.autopilot.desired_orbit_altitude = self.pe_altitude
-        self.autopilot.desired_inclination = self.inclination
-        self.pvg_ascent.desired_apoapsis = self.ap_altitude
-        # self.pvg_ascent.desired_attach_alt = self.pe_altitude
-        # self.pvg_ascent.attach_alt_flag = True
+        self.autopilot.desired_orbit_altitude = self.pe_altitude.to_value(u.m)
+        self.autopilot.desired_inclination = self.inclination.to_value(u.deg)
+        self.pvg_ascent.desired_apoapsis = self.ap_altitude.to_value(u.m)
 
         self.autopilot.force_roll = True
         self.autopilot.vertical_roll = 90
@@ -134,32 +137,27 @@ class Launch(Task):
 
     def _to_dict(self):
         dic = {
+            'orbit': self.orbit._to_dict(),
             'payload': self.payload,
             'crew_name_list': self.crew_name_list,
-            'path_index': self.path_index,
-            'pe_altitude': self.pe_altitude,
-            'ap_altitude': self.ap_altitude,
-            'inclination': self.inclination,
-            'autostage': self.autostage,
+            'direction': self.direction,
         }
         return super()._to_dict() | dic
 
     @classmethod
     def _from_dict(cls, data, tasks):
         from ..spacecrafts import SpacecraftBase
+        from ..astro.orbit import Orbit
         return cls(
             spacecraft = SpacecraftBase.get(data['spacecraft_name']),
             tasks = tasks,
-            start_time = data['start_time'],
-            duration = data['duration'],
+            orbit = Orbit._from_dict(data['orbit']),
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
             importance = data['importance'],
             payload = data['payload'],
             crew_name_list = data['crew_name_list'],
-            path_index = data['path_index'],
-            pe_altitude = data['pe_altitude'],
-            ap_altitude = data['ap_altitude'],
-            inclination = data['inclination'],
-            autostage = data['autostage'],
+            direction = data['direction'],
         )
 
 

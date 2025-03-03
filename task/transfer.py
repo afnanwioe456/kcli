@@ -18,8 +18,8 @@ class Transfer(Task):
                  spacecraft: SpacecraftBase, 
                  tasks: Tasks, 
                  orb_t: Orbit,
-                 start_time: float = -1, 
-                 duration: int = 300, 
+                 start_time: u.Quantity = -1 * u.s, 
+                 duration: u.Quantity = 300 * u.s, 
                  importance: int = 6,
                  ):
         """瞄准轨道转移规划"""
@@ -52,9 +52,28 @@ class Transfer(Task):
             self.spacecraft, 
             self.tasks, 
             self.orb_t, 
-            start_time = orb_cor.epoch.to_value(u.s))
+            start_time = orb_cor.epoch)
         self.tasks.submit(correct_task)
         self.conn.close()
+
+    def _to_dict(self):
+        dic =  {
+            'orb_t': self.orb_t._to_dict()
+        }
+        return super()._to_dict() | dic
+    
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        from ..astro.orbit import Orbit
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            tasks = tasks,
+            orb_t = Orbit._from_dict(data['orb_t']),
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
+            importance = data['importance'],
+        )
 
 
 class CourseCorrect(Task):
@@ -62,8 +81,8 @@ class CourseCorrect(Task):
                  spacecraft: SpacecraftBase, 
                  tasks: Tasks, 
                  orb_t: Orbit,
-                 start_time: float = -1, 
-                 duration: int = 300, 
+                 start_time: u.Quantity = -1 * u.s, 
+                 duration: u.Quantity = 300 * u.s, 
                  importance: int = 6,
                  ):
         """轨道修正"""
@@ -95,3 +114,21 @@ class CourseCorrect(Task):
         self.tasks.submit_nowait(mnv_tasks)
         self.conn.close()
     
+    def _to_dict(self):
+        dic =  {
+            'orb_t': self.orb_t._to_dict()
+        }
+        return super()._to_dict() | dic
+    
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        from ..astro.orbit import Orbit
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            tasks = tasks,
+            orb_t = Orbit._from_dict(data['orb_t']),
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
+            importance = data['importance'],
+        )

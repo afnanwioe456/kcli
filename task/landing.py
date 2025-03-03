@@ -22,8 +22,8 @@ class GlideLanding(Task):
     def __init__(self, 
                  spacecraft: SpacecraftBase, 
                  tasks: Tasks, 
-                 start_time: float = -1, 
-                 duration: int = 1800, 
+                 start_time: u.Quantity = -1 * u.s, 
+                 duration: u.Quantity = 1800 * u.s, 
                  importance: int = 3,
                  ):
         super().__init__(spacecraft, tasks, start_time, duration, importance)
@@ -41,12 +41,13 @@ class GlideLanding(Task):
         orbv = Orbit.from_krpcorb(krpc_orb)
         while orbv.pe > orbv.attractor.atomsphere_height:
             # 如果航天器此时还未转移到环绕要着陆的天体轨道上
+            # TODO: 判断过于简略, 如果已经进入大气层的情况
             krpc_orb = krpc_orb.next_orbit
             if krpc_orb is None:
                 raise ValueError(f'{self.name} not on a reentry orbit.')
             orbv = Orbit.from_krpcorb(krpc_orb)
         orb_reentry = orbv.propagate_to_r(orbv.attractor.r + orbv.attractor.atomsphere_height, sign=False)
-        time_wrap(orb_reentry.epoch.to_value(u.s))
+        time_wrap(orb_reentry.epoch)
         self.vessel = self.sc.active_vessel
         while not get_parts_in_stage_by_type(
             self.vessel, 
@@ -72,8 +73,8 @@ class ControlledReentry(Task):
     def __init__(self, 
                  spacecraft: SpacecraftBase, 
                  tasks: Tasks, 
-                 start_time: float = -1, 
-                 duration: int = 1800, 
+                 start_time: u.Quantity = -1 * u.s, 
+                 duration: u.Quantity = 1800 * u.s, 
                  importance: int = 3,
                  ):
         super().__init__(spacecraft, tasks, start_time, duration, importance)
@@ -81,7 +82,7 @@ class ControlledReentry(Task):
     @property
     def description(self):
         return (f'{self.name} -> 受控再入'
-                f'  预计执行时: {sec_to_date(self.start_time)}')
+                f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
     def start(self):
@@ -89,13 +90,14 @@ class ControlledReentry(Task):
             return
         krpc_orb = self.vessel.orbit
         orbv = Orbit.from_krpcorb(krpc_orb)
+        # TODO
         while orbv.pe > orbv.attractor.atomsphere_height:
             krpc_orb = krpc_orb.next_orbit
             if krpc_orb is None:
                 raise ValueError(f'{self.name} not on a reentry orbit.')
             orbv = Orbit.from_krpcorb(krpc_orb)
         orb_reentry = orbv.propagate_to_r(orbv.attractor.r + orbv.attractor.atomsphere_height, sign=False)
-        time_wrap(orb_reentry.epoch.to_value(u.s))
+        time_wrap(orb_reentry.epoch)
         self.sc.physics_warp_factor = 3
         mass_stream = self.conn.add_stream(getattr, self.vessel, 'mass')
         while mass_stream() > 0:

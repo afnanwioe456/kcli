@@ -24,8 +24,8 @@ class SimpleMnv(Task):
                  tasks: Tasks,
                  mode: str,
                  target: u.Quantity,
-                 start_time: float = -1,
-                 duration: int = 300,
+                 start_time: u.Quantity = -1 * u.s,
+                 duration: u.Quantity = 300 * u.s,
                  importance: int = 3,
                  tol: float = 0.1,
                  ):
@@ -92,8 +92,8 @@ class SimpleMnv(Task):
             tasks = tasks,
             mode = mode,
             target = data['target'] * u.deg if mode == 'inc' else data['target'] * u.km,
-            start_time = data['start_time'],
-            duration = data['duration'],
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
             importance = data['importance'],
             tol = data['tol'],
         )
@@ -106,7 +106,7 @@ class ExecuteNode(Task):
                  start_time: float, 
                  duration: int, 
                  importance: int = 7,
-                 tol: float = 0.1, 
+                 tol: float = 0.2, 
                  ):
         """执行最近的一个节点"""
         super().__init__(spacecraft, tasks, start_time, duration, importance)
@@ -130,11 +130,18 @@ class ExecuteNode(Task):
             sleep(5)
         self.conn.close()
 
-    @staticmethod
-    def from_node(spacecraft: SpacecraftBase, node: Node, tasks: Tasks, tol=0.1, importance=7):
+    @classmethod
+    def from_node(cls, spacecraft: SpacecraftBase, node: Node, tasks: Tasks, tol=0.2, importance=7):
         """执行节点"""
         # TODO: duration
-        return ExecuteNode(spacecraft, tasks, node.ut - 900, 1800, tol, importance)
+        return cls(
+            spacecraft = spacecraft, 
+            tasks = tasks, 
+            start_time = (node.ut - 900) * u.s, 
+            duration = 1800 * u.s, 
+            importance = importance,
+            tol = tol,
+        )
 
     def _to_dict(self):
         dic = {
@@ -148,8 +155,8 @@ class ExecuteNode(Task):
         return cls(
             spacecraft = SpacecraftBase.get(data['spacecraft_name']),
             tasks = tasks,
-            start_time = data['start_time'],
-            duration = data['duration'],
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
             importance = data['importance'],
             tol = data['tol'],
         )

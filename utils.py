@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Optional, Type
+from astropy import units as u
 from dateutil import parser, tz
 from datetime import datetime, timedelta
 import logging
@@ -22,10 +23,10 @@ def setup_logger():
     logger = logging.getLogger("kcli")
     logger.setLevel(logging.DEBUG)
 
-    file_handler = logging.FileHandler("kcli/.live/log.txt", encoding="utf-8")
+    file_handler = logging.FileHandler("./.live/log.txt", encoding="utf-8")
     file_handler.setLevel(logging.INFO)
 
-    debug_file_handler = logging.FileHandler("kcli/.live/debug.log", encoding="utf-8")
+    debug_file_handler = logging.FileHandler("./.live/debug.log", encoding="utf-8")
     debug_file_handler.setLevel(logging.DEBUG)
 
     console_handler = logging.StreamHandler()
@@ -72,29 +73,29 @@ UTIL_CONN = None if _DEBUG_MODE else krpc.connect('krpclive', address='127.0.0.1
 
 ### IN-GAME TIME CONTROL ###
 
-def get_ut():
+def get_ut() -> u.Quantity:
     if _DEBUG_MODE:
-        return 0.
-    return UTIL_CONN.space_center.ut
+        return 0 * u.s
+    return UTIL_CONN.space_center.ut * u.s
 
 
-def time_wrap(start_time):
-    ut = UTIL_CONN.space_center.ut
+def time_wrap(start_time: u.Quantity):
+    ut = UTIL_CONN.space_center.ut * u.s
     if ut < start_time:
         LOGGER.debug(f'time wrapping to {sec_to_date(start_time)} ...')
-        UTIL_CONN.space_center.warp_to(start_time)
+        UTIL_CONN.space_center.warp_to(start_time.to_value(u.s))
 
 
-def date_to_sec(input_date: str) -> int | None:
+def date_to_sec(input_date: str) -> u.Quantity | None:
     """
-    日期转换为自1951-01-01 00:00:00的秒数, 无法解析时返回None
+    日期转换为自1951-01-01 00:00:00的时间, 无法解析时返回None
     """
     try:
         # 尝试使用dateutil.parser解析输入
         parsed_date = parser.parse(input_date).replace(tzinfo=tz.tzutc())
         # 如果没有输入日期
         if parsed_date.date() == parser.parse('00:00:00').date():
-            default_date = str(sec_to_date(int(get_ut())).date())
+            default_date = str(sec_to_date(get_ut()).date())
             parsed_date = parser.parse(f'{default_date} {input_date}').replace(tzinfo=tz.tzutc())
         epoch_date = parser.parse("1970-01-01 00:00:00 UTC")
         time_difference = parsed_date - epoch_date
@@ -105,28 +106,40 @@ def date_to_sec(input_date: str) -> int | None:
         return
 
     if seconds_since_ksp_epoch is not None:
-        return seconds_since_ksp_epoch
+        return seconds_since_ksp_epoch * u.s
 
 
-def sec_to_date(seconds) -> datetime:
+def sec_to_date(seconds: u.Quantity) -> datetime:
     """
-    自1951-01-01 00:00:00的秒数转换为datetime对象
+    自1951-01-01 00:00:00的时间转换为datetime对象
     """
     epoch = datetime(1951, 1, 1, 0, 0, 0)
-    time_difference = timedelta(seconds=int(seconds))
+    time_difference = timedelta(seconds=seconds.to_value(u.s))
     result_datetime = epoch + time_difference
     return result_datetime
 
 ### LAUNCH_SITE ###
 
-def get_launch_site_position(site: str = 'wenchang'):
-    la, lo = LAUNCH_SITES_COORDS[site]
+def get_site_position(name: str = 'wenchang'):
+    """发射场或载具的位置矢量"""
+    pos = LAUNCH_SITES_COORDS.get(name, None)
+    if pos is None:
+        v = get_vessel_by_name(name)
+        if v is not None:  
+            # 如果传入的载具已经在任务中, 则将它作为发射位置
+            site_p = v.position(v.orbit.body.non_rotating_reference_frame)
+            site_p = (site_p[0], site_p[2], site_p[1])
+            return site_p
+        else:
+            pos = LAUNCH_SITES_COORDS.get('wenchang')
+    la, lo = pos
     body = UTIL_CONN.space_center.bodies['Earth']
     site_p = body.surface_position(la, lo, body.non_rotating_reference_frame)
     site_p = (site_p[0], site_p[2], site_p[1])
     return site_p
 
 def dummy_roll_out():
+    """用于将游戏场景切换回"""
     sc = UTIL_CONN.space_center
     sc.launch_vessel('VAB', 'dummy', 'LaunchPad', True, [])
 

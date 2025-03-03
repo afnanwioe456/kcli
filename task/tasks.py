@@ -1,6 +1,7 @@
 from __future__ import annotations
 import krpc
 import threading
+from astropy import units as u
 from typing import TYPE_CHECKING
 
 from ..utils import *
@@ -36,8 +37,8 @@ class Task:
     def __init__(self,
                  spacecraft: SpacecraftBase,
                  tasks: Tasks,
-                 start_time: float,
-                 duration: int,
+                 start_time: u.Quantity,
+                 duration: u.Quantity,
                  importance: int,
                  ):
         self.spacecraft = spacecraft
@@ -55,7 +56,7 @@ class Task:
     def short_description(self) -> str:
         return self.description.split('\n')[0]
 
-    def reschedule(self, after_t):
+    def reschedule(self, after_t: u.Quantity):
         self.start_time = after_t
 
     def __str__(self):
@@ -80,8 +81,8 @@ class Task:
         return {
             'type': self.__class__.__name__,
             'spacecraft_name': self.spacecraft.name,
-            'start_time': self.start_time,
-            'duration': self.duration,
+            'start_time': self.start_time.to_value(u.s),
+            'duration': self.duration.to_value(u.s),
             'importance': self.importance,
         }
 
@@ -89,7 +90,7 @@ class Task:
     def _from_dict(cls, data, tasks):
         from ..spacecrafts import SpacecraftBase
         s = SpacecraftBase.get(data['spacecraft_name'])
-        return cls(s, tasks, data['start_time'], data['duration'], data['importance'])
+        return cls(s, tasks, data['start_time'] * u.s, data['duration'] * u.s, data['importance'])
 
 
 class Tasks:
@@ -238,7 +239,7 @@ class TaskQueue:
             raise ValueError()
         ut = get_ut()
         if tasks.next_task.start_time < ut:
-            tasks.next_task.start_time = ut + 60
+            tasks.next_task.start_time = ut + 60 * u.s
         with cls._queue_condition:
             cls._put_helper(tasks)
             cls._size += 1
@@ -368,8 +369,9 @@ class TaskQueue:
     @classmethod
     def dump_all(cls):
         task_list = []
-        while cls._size > 0:
-            task_list.append(cls.get()._to_dict())
+        with cls._queue_condition:
+            while cls._size > 0:
+                task_list.append(cls.get()._to_dict())
         return task_list
 
     @classmethod

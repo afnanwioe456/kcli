@@ -44,7 +44,7 @@ class OrbitBase:
         return self._h
 
     @cached_property
-    def h_vec(self):
+    def h_vec(self) -> np.ndarray[u.Quantity]:
         return np.cross(self.r_vec, self.v_vec)
 
     @property
@@ -88,7 +88,7 @@ class OrbitBase:
         return self._r_vec
 
     @cached_property
-    def r(self):
+    def r(self) -> u.Quantity:
         return np.linalg.norm(self.r_vec)
 
     @property
@@ -98,31 +98,31 @@ class OrbitBase:
         return self._v_vec
 
     @cached_property
-    def v(self):
+    def v(self) -> u.Quantity:
         return np.linalg.norm(self.v_vec)
 
     @cached_property
-    def vt(self):
+    def vt(self) -> u.Quantity:
         return self.h / self.r
 
     @cached_property
-    def vt_vec(self):
+    def vt_vec(self) -> np.ndarray[u.Quantity]:
         vt_v = np.cross(self.h_vec, self.r_vec)
         vt_i = vt_v / np.linalg.norm(vt_v)
         return vt_i * self.vt
 
     @cached_property
-    def vr(self):
+    def vr(self) -> u.Quantity:
         return np.sqrt(self.v ** 2 - self.vt ** 2)
 
     @cached_property
-    def vr_vec(self):
+    def vr_vec(self) -> np.ndarray[u.Quantity]:
         vr = self.vr if self.nu < np.pi * u.rad else -self.vr
         vr_i = self.r_vec / self.r
         return vr_i * vr
 
     @cached_property
-    def period(self):
+    def period(self) -> u.Quantity:
         if self.e >= 1:
             return np.inf * u.s
         return T(
@@ -131,12 +131,11 @@ class OrbitBase:
             ) * u.s
 
     @cached_property
-    def delta_t(self):
+    def delta_t(self) -> u.Quantity:
         """从近地点到真近点角的Δt"""
         return self.delta_t_at_nu(self.nu)
     
-    @u.quantity_input(nu=u.rad)
-    def delta_t_at_nu(self, nu):
+    def delta_t_at_nu(self, nu) -> u.Quantity:
         """从近地点到真近点角的Δt"""
         if self.e < 1:
             return nu2dt_e(
@@ -151,8 +150,7 @@ class OrbitBase:
             self.h.to_value(u.km ** 2 / u.s)
             ) * u.s
     
-    @u.quantity_input(nu=u.rad)
-    def r_at_nu(self, nu):
+    def r_at_nu(self, nu) -> u.Quantity:
         nu = self._correct_coe(nu)
         return nu2r(
             nu.to_value(u.rad),
@@ -161,8 +159,7 @@ class OrbitBase:
             self.attractor.k.to_value(u.km ** 3 / u.s ** 2)
         ) * u.km
 
-    @u.quantity_input(r_vec=u.km)
-    def nu_at_direction(self, r_vec):
+    def nu_at_direction(self, r_vec) -> u.Quantity:
         from ..frame import PQWFrame
         r_vec = r_vec.to_value(u.km)
         r_vec = PQWFrame.from_orbit(self).transform_d_from_parent(r_vec)
@@ -180,15 +177,14 @@ class OrbitBase:
         return self.r_at_nu(np.pi * u.rad)
 
     @cached_property
-    def ap(self):
+    def ap(self) -> u.Quantity:
         return self.ra - self.attractor.r
     
     @cached_property
-    def pe(self):
+    def pe(self) -> u.Quantity:
         return self.rp - self.attractor.r
 
-    @u.quantity_input(nu=u.rad)
-    def is_safe(self, nu=0*u.rad):
+    def is_safe(self, nu=0*u.rad) -> bool:
         nu = self._correct_coe(nu)
         rp = self.r_at_nu(nu)
         limit = self.attractor.r + self.attractor.atomsphere_height
@@ -271,4 +267,4 @@ class OrbitBase:
         return (f"Orbit {round(self.pe.to_value(u.km), 2)} * "
                 f"{round(self.ap.to_value(u.km), 2)} km "
                 f"around {self.attractor.name} "
-                f"at {sec_to_date(int(self.epoch.to_value(u.s)))}")
+                f"at {sec_to_date(self.epoch)}")

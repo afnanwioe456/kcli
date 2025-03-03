@@ -78,9 +78,10 @@ def orbit_launch_window(orbit: Orbit,
             if not direction.all():
                 phase_angle = -phase_angle
             if min_phase < phase_angle < max_phase:
+                print(phase_angle)
                 return launch_window * u.s
-            if min_phase < phase_angle < best_phase_angle:
-                best_phase_angle = phase_angle
-                best_launch_window = launch_window
+            # if min_phase < phase_angle < best_phase_angle:
+            #     best_phase_angle = phase_angle
+            #     best_launch_window = launch_window
 
     return best_launch_window * u.s

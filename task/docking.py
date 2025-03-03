@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from time import sleep
+from astropy import units as u
 
 from .tasks import Task
 from ..autopilot import get_closer
@@ -40,8 +41,8 @@ class Docking(Task):
                  spacestation: SpaceStation,
                  docking_port: DockingPortStatus,
                  tasks: Tasks, 
-                 start_time: int = -1, 
-                 duration: int = 1800, 
+                 start_time: u.Quantity = -1 * u.s, 
+                 duration: u.Quantity = 1800 * u.s, 
                  importance: int = 3):
         super().__init__(spacecraft, tasks, start_time, duration, importance)
         self.spacestation = spacestation
@@ -50,7 +51,7 @@ class Docking(Task):
     @property
     def description(self):
         return (f'{self.name} -> {self.spacestation.name} 对接\n'
-                f'\t预计执行时: {sec_to_date(int(self.start_time))}')
+                f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
     def start(self):
@@ -88,8 +89,8 @@ class Docking(Task):
             spacestation = ss,
             docking_port = ss.get_docking_port(data['docking_port_num']),
             tasks = tasks,
-            start_time = data['start_time'],
-            duration = data['duration'],
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
             importance = data['importance'],
         )
 
@@ -99,8 +100,8 @@ class Undocking(Task):
                  spacestation: SpaceStation,
                  docking_port: DockingPortStatus,
                  tasks: Tasks, 
-                 start_time: int = -1, 
-                 duration: int = 1800, 
+                 start_time: u.Quantity = -1 * u.s, 
+                 duration: u.Quantity = 1800 * u.s, 
                  importance: int = 3):
         super().__init__(spacestation, tasks, start_time, duration, importance)
         self.spacestation = spacestation
@@ -109,7 +110,7 @@ class Undocking(Task):
     @property
     def description(self):
         return (f'{self.spacestation}对接口[{self.docking_port.num}] -> 对接分离\n'
-                f'\t预计执行时: {sec_to_date(int(self.start_time))}')
+                f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
     def start(self):
@@ -143,8 +144,8 @@ class Undocking(Task):
             spacestation = ss,
             docking_port = ss.get_docking_port(data['docking_port_num']),
             tasks = tasks,
-            start_time = data['start_time'],
-            duration = data['duration'],
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
             importance = data['importance'],
         )
         

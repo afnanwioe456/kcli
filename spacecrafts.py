@@ -122,7 +122,7 @@ class SpaceStation(SpacecraftBase):
     _instances = {}
     _new_lock = threading.Lock()
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls not in cls._instances:
             with cls._new_lock:
                 if cls not in cls._instances:
@@ -209,11 +209,10 @@ class SpaceStation(SpacecraftBase):
         
 
 class KerbalSpaceStation(SpaceStation):
-    _insert_orbit = (240000, 240000)
-    _deorbit_alt = 50000
-    _launch_lead_time = 360
+    _deorbit_alt = 50000 * u.m
+    _launch_lead_time = 360 * u.s
     _min_phase_diff = 10 * u.deg
-    _max_phase_diff = 40 * u.deg
+    _max_phase_diff = 30 * u.deg
     _time_between_missions = 90 * u.d
 
     def __init__(self, *args, **kwargs):
@@ -240,33 +239,38 @@ class KerbalSpaceStation(SpaceStation):
             counter = self._supply_mission_count
         else:
             raise ValueError(mission_type)
-        site_p = get_launch_site_position()
+        site_p = get_site_position()
         orb = Orbit.from_krpcv(self.vessel)
         if self._last_mission_end_time < orb.epoch:
             self._last_mission_end_time = orb.epoch
+        start_time = self._last_mission_end_time
         end_time = self._last_mission_end_time + self._time_between_missions
-        launch_window = Orbit.launch_window(orb, 
-                                            site_p, 
-                                            direction='SE', 
-                                            min_phase=self._min_phase_diff, 
-                                            max_phase=self._max_phase_diff,
-                                            start_time=self._last_mission_end_time,
-                                            end_time=end_time)
         self._last_mission_end_time = end_time
-        launch_window = launch_window.to_value(u.s)
-        inc = -np.degrees(self.vessel.orbit.inclination)
-
-        spacecraft = Spacecraft(f'{self.name} crew mission {counter}')
+        launch_direction = 'SE'
+        launch_window = orb.launch_window(site_p, 
+                                          direction=launch_direction, 
+                                          min_phase=self._min_phase_diff, 
+                                          max_phase=self._max_phase_diff,
+                                          start_time=start_time,
+                                          end_time=end_time)
+        spacecraft = Spacecraft(f'{self.name} {mission_type} mission {counter}')
         from .task.launch import Soyuz2Launch
         from .task.rendezvous import Rendezvous
         from .task.docking import Docking
+        insert_orbit = Orbit.from_coe(orb.attractor,
+                                      orb.attractor.r + 240 * u.km,
+                                      0.001 * u.one,
+                                      orb.inc,
+                                      orb.raan,
+                                      orb.argp,
+                                      orb.nu,
+                                      orb.epoch)
         launch_task = Soyuz2Launch(spacecraft=spacecraft,
                                    tasks=tasks,
+                                   orbit=insert_orbit,
                                    # payload_name='_Soyuz_Spacecraft',
-                                   ap_altitude=self._insert_orbit[0],
-                                   pe_altitude=self._insert_orbit[1],
-                                   inclination=inc,
-                                   start_time=launch_window - self._launch_lead_time)
+                                   start_time=launch_window - self._launch_lead_time,
+                                   direction=launch_direction)
         rdv_task = Rendezvous(spacecraft, self, tasks)
         dock_task = Docking(spacecraft, 
                             self, 
@@ -280,7 +284,7 @@ class KerbalSpaceStation(SpaceStation):
         from .task.landing import GlideLanding
         s = docking_port.docked_with
         undocking_task = Undocking(self, docking_port, tasks)
-        mnv_plan_task = SimpleMnv(s, tasks, 'pe', self._deorbit_alt * u.m, importance=0)
+        mnv_plan_task = SimpleMnv(s, tasks, 'pe', self._deorbit_alt, importance=0)
         landing_task = GlideLanding(s, tasks)
         return [undocking_task, mnv_plan_task, landing_task]
 
@@ -290,7 +294,7 @@ class KerbalSpaceStation(SpaceStation):
         from .task.landing import ControlledReentry
         s = docking_port.docked_with
         undocking_task = Undocking(self, docking_port, tasks)
-        mnv_plan_task = SimpleMnv(s, tasks, 'pe', self._deorbit_alt * u.m, importance=0)
+        mnv_plan_task = SimpleMnv(s, tasks, 'pe', self._deorbit_alt, importance=0)
         reentry_task = ControlledReentry(s, tasks)
         return [undocking_task, mnv_plan_task, reentry_task]
         
@@ -351,7 +355,12 @@ class DockingPortStatus:
     def undock(self):
         if not self.is_docked():
             raise RuntimeError(f'{self.spacecraft} docking port [{self.num}]: not docked with any spacecraft!')
-        v = self.part.undock()
+        
+        try:
+            v = self.part.undock()
+        except RuntimeError:
+            v = self.part.docked_part.docking_port.undock()
+
         if v.name != self.docked_with.name:
             raise RuntimeError(f'Inconsistent spacecrafts: {v.name}, {self.docked_with.name}')
         return_sc = self.docked_with

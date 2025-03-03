@@ -4,15 +4,25 @@ from astropy import units as u
 
 from .utils import UTIL_CONN
 
+
+__all__ = [
+    'Body',
+    'KSP_Earth',
+    'KSP_Moon',
+    'BODY_DIC',
+]
+
+
 class Body:
     def __init__(self,
-                 name,
+                 name: str,
                  attractor,
-                 r,
-                 k,
-                 soi,
-                 rotational_period,
-                 atomsphere_height = 0 * u.km,):
+                 r: u.Quantity,
+                 k: u.Quantity,
+                 soi: u.Quantity,
+                 rotational_period: u.Quantity,
+                 atomsphere_height: u.Quantity = 0 * u.km,
+                 ):
         self.name = name
         self.attractor = attractor
         self.r = r
@@ -51,3 +61,9 @@ KSP_Moon = Body(
     2370996.25 * u.s,
     atomsphere_height = 0 * u.km,
 )
+
+
+BODY_DIC = {
+    'Earth': KSP_Earth,
+    'Moon': KSP_Moon,
+}

@@ -29,7 +29,8 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
     vessel.control.sas = True
     sleep(0.1)
     vessel.control.sas_mode = SASMode.target
-    sleep(3)
+    # TODO: 稳定判断
+    sleep(10)
     balance_rcs(vessel)
     while True:
         sleep(rate)
@@ -44,7 +45,7 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
         dd = d - set_point
         dd_abs = abs(dd)
         s_target = dd / dd_abs * (2 * a_limit * dd_abs) ** 0.5
-        s_target = s_target * smooth_step(s_target, 5)  # 10m/s以内快速衰减避免过冲
+        s_target = s_target * smooth_step(s_target, 10)  # 20m/s以内快速衰减避免过冲
         v_target = position / d * s_target
         dv = v_target - velocity
 

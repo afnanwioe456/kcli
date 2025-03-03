@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
+from astropy import units as u
 
 from .tasks import Task
 from .maneuver import ExecuteNode
@@ -22,8 +23,8 @@ class Rendezvous(Task):
                  spacecraft: SpacecraftBase,
                  spacestation: SpaceStation,
                  tasks: Tasks,
-                 start_time: int = -1,
-                 duration: int = 300,
+                 start_time: u.Quantity = -1 * u.s,
+                 duration: u.Quantity = 300 * u.s,
                  importance: int = 6, 
                  ):
         super().__init__(spacecraft, tasks, start_time, duration, importance)
@@ -32,7 +33,7 @@ class Rendezvous(Task):
     @property
     def description(self):
         return (f'{self.name} -> {self.spacestation.name} 交会规划\n'
-                f'\t预计执行时: {sec_to_date(int(self.start_time))}')
+                f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
     def start(self):
@@ -65,8 +66,8 @@ class Rendezvous(Task):
             spacecraft = SpacecraftBase.get(data['spacecraft_name']),
             spacestation = SpacecraftBase.get(data['spacestation_name']),
             tasks = tasks,
-            start_time = data['start_time'],
-            duration = data['duration'],
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
             importance = data['importance'],
         )
         
