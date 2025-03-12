@@ -3,6 +3,7 @@ from time import sleep
 from astropy import units as u
 
 from .tasks import Task
+from .utils import *
 from ..astro.orbit import *
 from ..astro.maneuver import *
 from ..utils import *
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     'SimpleMnv',
+    'CaptureMnv',
     'ExecuteNode',
 ]
 
@@ -24,25 +26,32 @@ class SimpleMnv(Task):
                  tasks: Tasks,
                  mode: str,
                  target: u.Quantity,
+                 orb: Orbit | None = None,
                  start_time: u.Quantity = -1 * u.s,
                  duration: u.Quantity = 300 * u.s,
                  importance: int = 3,
-                 tol: float = 0.1,
+                 tol: float = 0.2,
+                 submit_next: bool = True,
                  ):
-        """进行一次简单的轨道机动
+        """进行一次简单的轨道机动规划
 
         Args:
             name (str): 载具名
             tasks (Tasks): Tasks对象
             mode (str): 机动规划模式(ap, pe, inc)
             target (float): 规划机动的目标
+            orb (Orbit, optional): 轨道, 默认规划spacecraft在start_time所处的轨道. Defaults to None.
             start_time (float, optional): 任务执行时. Defaults to -1.
             duration (int, optional): 任务时长. Defaults to 300.
         """
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.mode = mode
         self.target = target
         self.tol = tol
+        if type(orb) is Orbit:
+            self.orb = orb
+        else:
+            self.orb = Orbit.from_krpcv(self.spacecraft.vessel)
 
     @property
     def description(self):
@@ -51,36 +60,41 @@ class SimpleMnv(Task):
                 f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @staticmethod
-    def _invoke_mnv(mode, orb_v: Orbit, target: u.Quantity):
+    def _invoke_mnv(mode, orb: Orbit, target: u.Quantity):
         if mode == 'ap':
-            return Maneuver.change_apoapsis(orb_v, target)
+            return Maneuver.change_apoapsis(orb, target)
         if mode == 'pe':
-            return Maneuver.change_periapsis(orb_v, target)
+            return Maneuver.change_periapsis(orb, target)
         if mode == 'inc':
-            orb_t = Orbit.from_coe(orb_v.attractor, orb_v.a, orb_v.e, target,
-                                   orb_v.raan, orb_v.argp, orb_v.nu, orb_v.epoch)
-            return Maneuver.match_plane(orb_v, orb_t, True)
+            orb_t = Orbit.from_coe(orb.attractor, orb.a, orb.e, target,
+                                   orb.raan, orb.argp, orb.nu, orb.epoch)
+            return Maneuver.match_plane(orb, orb_t, True)
         raise ValueError(f'maneuver mode: {mode}')
 
     @logging_around
     def start(self):
         if not self._conn_setup():
             return
-        orbv = Orbit.from_krpcv(self.vessel)
-        mnv = self._invoke_mnv(self.mode, orbv, self.target)
+        time_wrap(self.start_time)
+        mnv = self._invoke_mnv(self.mode, self.orb, self.target)
         nodes = mnv.to_krpcv(self.vessel)
+        if self.submit_next:
+            self._submit_next_task(nodes)
+        self.conn.close()
+
+    def _submit_next_task(self, nodes):
         task_list = []
         for n in nodes:
             task_list.append(ExecuteNode.from_node(self.spacecraft, n, self.tasks, tol=self.tol))
         self.tasks.submit_nowait(task_list)
-        self.conn.close()
 
     def _to_dict(self):
         dic = {
             'mode': self.mode,
             'target': self.target.to_value(u.deg) if self.mode == 'inc' else self.target.to_value(u.km),
             'tol': self.tol,
-        }
+            'orb': self.orb._to_dict(),
+            }
         return super()._to_dict() | dic
 
     @classmethod
@@ -92,24 +106,99 @@ class SimpleMnv(Task):
             tasks = tasks,
             mode = mode,
             target = data['target'] * u.deg if mode == 'inc' else data['target'] * u.km,
+            orb = Orbit._from_dict(data['orb']),
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
             importance = data['importance'],
             tol = data['tol'],
-        )
+            submit_next = data['submit_next'],
+            )
 
 
+class CaptureMnv(Task):
+    def __init__(self, 
+                 spacecraft: SpacecraftBase, 
+                 tasks: Tasks, 
+                 orb_t: Orbit,
+                 ap_t: u.Quantity,
+                 start_time: u.Quantity = -1 * u.s, 
+                 duration: u.Quantity = 300 * u.s, 
+                 importance: int = 9,
+                 submit_next: bool = True,
+                 ):
+        """捕获机动"""
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
+        self.orb_t = orb_t
+        self.ap_t = ap_t
+
+    @property
+    def description(self):
+        return (f'{self.name} 捕获机动规划\n'
+                f'\t{self.orb_t.attractor.name}: {self.ap_t}\n'
+                f'\t预计执行时: {sec_to_date(self.start_time)}')
+
+    @logging_around
+    def start(self):
+        if not self._conn_setup():
+            return
+        krpc_orb = self.spacecraft.vessel.orbit
+        while krpc_orb.body.name != self.orb_t.attractor.name:
+            krpc_orb = krpc_orb.next_orbit
+            if krpc_orb is None:
+                self.conn.close()
+                raise RuntimeError(f"{self.spacecraft.name} not in a fly-by orbit of {self.orb_t.attractor.name}")
+        orb = Orbit.from_krpcorb(krpc_orb)
+        mnv = SimpleMnv(
+            self.spacecraft, 
+            self.tasks, 
+            'ap', 
+            self.ap_t, 
+            orb=orb,
+            importance=self.importance,
+            submit_next=self.submit_next,
+            )
+        self.tasks.submit_nowait(mnv)
+        self.conn.close()
+
+    def _to_dict(self):
+        dic =  {
+            'orb_t': self.orb_t._to_dict(),
+            'ap_t': self.ap_t.to_value(u.km),
+            }
+        return super()._to_dict() | dic
+    
+    @classmethod
+    def _from_dict(cls, data, tasks):
+        from ..spacecrafts import SpacecraftBase
+        from ..astro.orbit import Orbit
+        return cls(
+            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            tasks = tasks,
+            orb_t = Orbit._from_dict(data['orb_t']),
+            ap_t = data['ap_t'] * u.km,
+            start_time = data['start_time'] * u.s,
+            duration = data['duration'] * u.s,
+            importance = data['importance'],
+            submit_next = data['submit_next'],
+            )
+
+        
 class ExecuteNode(Task):
     def __init__(self, 
                  spacecraft: SpacecraftBase, 
                  tasks: Tasks, 
-                 start_time: float, 
-                 duration: int, 
+                 burn_time: u.Quantity,
+                 start_time: u.Quantity = -1 * u.s, 
+                 duration: u.Quantity = 600 * u.s, 
                  importance: int = 7,
                  tol: float = 0.2, 
+                 submit_next: bool = True,
                  ):
         """执行最近的一个节点"""
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        if duration < burn_time + 60 * u.s:
+            duration = burn_time + 60 * u.s
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
+        self.burn_time = burn_time
         self.tol = tol
 
     @property
@@ -121,32 +210,48 @@ class ExecuteNode(Task):
     def start(self):
         if not self._conn_setup():
             return
-        self.vessel.control.rcs = True
+        if self.burn_time > 3 * u.s:
+            self.spacecraft.main_engine = True
+        else:
+            self.spacecraft.main_engine = False
+        self.spacecraft.rcs = True
         self.executor = self.mj.node_executor
         self.executor.autowarp = True
         self.executor.tolerance = self.tol
         self.executor.execute_one_node()
         while not self.tasks.abort_flag and self.executor.enabled:
             sleep(5)
+        self.spacecraft.rcs = False
         self.conn.close()
 
     @classmethod
-    def from_node(cls, spacecraft: SpacecraftBase, node: Node, tasks: Tasks, tol=0.2, importance=7):
+    def from_node(cls, 
+                  spacecraft: SpacecraftBase, 
+                  node: Node, 
+                  tasks: Tasks, 
+                  importance: int = 7, 
+                  tol: float = 0.2, 
+                  submit_next: bool = True,
+                  ):
         """执行节点"""
-        # TODO: duration
+        v = spacecraft.vessel
+        burn_time = compute_burn_time(node.delta_v, spacecraft.main_engine, v.mass)
         return cls(
             spacecraft = spacecraft, 
             tasks = tasks, 
+            burn_time = burn_time * u.s,
             start_time = (node.ut - 900) * u.s, 
-            duration = 1800 * u.s, 
+            duration = 600 * u.s, 
             importance = importance,
             tol = tol,
-        )
+            submit_next = submit_next,
+            )
 
     def _to_dict(self):
         dic = {
+            'burn_time': self.burn_time.to_value(u.s),
             'tol': self.tol,
-        }
+            }
         return super()._to_dict() | dic
     
     @classmethod
@@ -155,8 +260,10 @@ class ExecuteNode(Task):
         return cls(
             spacecraft = SpacecraftBase.get(data['spacecraft_name']),
             tasks = tasks,
+            burn_time = data['burn_time'] * u.s,
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
             importance = data['importance'],
             tol = data['tol'],
-        )
+            submit_next = data['submit_next'],
+            )

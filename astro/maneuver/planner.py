@@ -11,7 +11,7 @@ from ..frame import PQWFrame
 
 
 def apoapsis_planner(orbit: Orbit, ap: u.Quantity):
-    if orbit.e >= 1 * u.one and orbit.nu < np.pi:
+    if orbit.e >= 1 * u.one and orbit.nu < np.pi * u.rad:
         raise ValueError('Planner "change_apoasis" cannot handle orbit that is about to escape, try other planner.')
     ra = ap + orbit.attractor.r
     rp = orbit.rp
@@ -118,14 +118,14 @@ def change_phase_planner(orb: Orbit, revisit, inner, conserved=True):
         inter_T = dt / M
     if inter_T < limit_T:
         return
-    dv = _get_dv(orb, inter_T)
+    dv = _get_dv_with_new_T(orb, inter_T)
     imp = orb.v_vec / orb.v * dv
     if conserved:
         return [(0 * u.s, imp), (dt, -imp)]
     else:
         return [(0 * u.s, imp)]
 
-def _get_dv(orb: Orbit, T):
+def _get_dv_with_new_T(orb: Orbit, T):
     v0 = orb.v
     v1 = T2v(T, orb.r.to_value(u.km), orb.attractor.k.to_value(u.km ** 3 / u.s ** 2)) * u.km / u.s
     return v1 - v0

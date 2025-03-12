@@ -26,8 +26,9 @@ class Rendezvous(Task):
                  start_time: u.Quantity = -1 * u.s,
                  duration: u.Quantity = 300 * u.s,
                  importance: int = 6, 
+                 submit_next: bool = True,
                  ):
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.spacestation = spacestation
 
     @property
@@ -46,17 +47,21 @@ class Rendezvous(Task):
         v_orb = Orbit.from_krpcv(self.vessel)
         mnv = Maneuver.opt_bi_impulse_rdv(v_orb, ss_orb)
         nodes = mnv.to_krpcv(self.vessel)
+        if self.submit_next:
+            self._submit_next_task(nodes)
+        self.conn.close()
+        
+    def _submit_next_task(self, nodes):
         next_task: list[Task] = []
         for n in nodes:
             task = ExecuteNode.from_node(self.spacecraft, n, self.tasks, importance=8)
             next_task.append(task)
         self.tasks.submit_nowait(next_task)
-        self.conn.close()
         
     def _to_dict(self):
         dic = {
             'spacestation_name': self.spacestation.name,
-        }
+            }
         return super()._to_dict() | dic
     
     @classmethod
@@ -69,5 +74,6 @@ class Rendezvous(Task):
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
             importance = data['importance'],
-        )
+            submit_next = data['submit_next'],
+            )
         

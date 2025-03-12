@@ -37,6 +37,7 @@ def T(a, GM):
 
 @njit
 def T2v(T, r, GM):
+    """根据椭圆轨道周期和半径求速度"""
     a = (T * sqrt(GM) / (2 * pi)) ** (2 / 3)
     return r2v(r, a, GM, 0)
 

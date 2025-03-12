@@ -276,13 +276,18 @@ def _find_e_orbit_root(rp_e, *args):
     delta_t, argp = _min_rp_at_e_orbit(e, *args)[1]
     return e, delta_t, argp
 
-def transfer_orbit_target(orb_v: Orbit, orb_t: Orbit, cap_t, timed=False):
+def transfer_orbit_target(orb_v: Orbit, 
+                          orb_t: Orbit, 
+                          cap_t: u.Quantity, 
+                          rp_t: u.Quantity | None = None,
+                          timed=False):
     """向卫星目标轨道转移的瞄准轨道, 位于捕获临界前
 
     Args:
         orb_v (Orbit): 航天器轨道
         orb_t (Orbit): 目标轨道
         cap_t (Quantity): 瞄准捕获时间
+        rp_t (Quantity): 飞越近星点
         timed (bool): 严格按瞄准时间捕获
 
     Returns:
@@ -297,12 +302,13 @@ def transfer_orbit_target(orb_v: Orbit, orb_t: Orbit, cap_t, timed=False):
     rm_vec = orb_m.r_vec.to_value(u.km)
     vm_vec = orb_m.v_vec.to_value(u.km / u.s)
     rp_e = orb_v.ra.to_value(u.km)
-    rp_m = orb_t.ra.to_value(u.km)
+    rp_m = rp_t if rp_t else orb_t.ra.to_value(u.km)
     GM_e = moon.attractor.k.to_value(u.km ** 3 / u.s ** 2)
     GM_m = moon.k.to_value(u.km ** 3 / u.s ** 2)
     soi = moon.soi.to_value(u.km)
     raan = orb_t.raan.to_value(u.rad)
     inc = orb_t.inc.to_value(u.rad)
+
     args = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
     e, delta_t, argp = _find_e_orbit_root(rp_e, *args)
     rcap_vec, vcap_vec = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)

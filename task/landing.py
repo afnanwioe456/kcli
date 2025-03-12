@@ -25,8 +25,9 @@ class GlideLanding(Task):
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 
                  importance: int = 3,
+                 submit_next: bool = True,
                  ):
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
 
     @property
     def description(self):
@@ -76,8 +77,9 @@ class ControlledReentry(Task):
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 
                  importance: int = 3,
+                 submit_next: bool = True,
                  ):
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
 
     @property
     def description(self):

@@ -34,8 +34,9 @@ class Launch(Task):
                  payload: str = "Relay",
                  crew_name_list: None | list[str] = None,
                  direction: str = 'SE',
+                 submit_next: bool = True,
                  ):
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.orbit = orbit
         self.direction = direction
         if self.start_time == -1 * u.s:
@@ -118,7 +119,8 @@ class Launch(Task):
         LOGGER.debug(f'{self.name}: autopilot engaged')
         while not self.tasks.abort_flag and self.autopilot.enabled:
             sleep(10)
-        self._submit_next_task()
+        if self.submit_next:
+            self._submit_next_task()
         self.conn.close()
 
     def _submit_next_task(self):
@@ -141,7 +143,7 @@ class Launch(Task):
             'payload': self.payload,
             'crew_name_list': self.crew_name_list,
             'direction': self.direction,
-        }
+            }
         return super()._to_dict() | dic
 
     @classmethod
@@ -158,7 +160,8 @@ class Launch(Task):
             payload = data['payload'],
             crew_name_list = data['crew_name_list'],
             direction = data['direction'],
-        )
+            submit_next = data['submit_next'],
+            )
 
 
 class Soyuz2Launch(Launch):

@@ -43,8 +43,9 @@ class Docking(Task):
                  tasks: Tasks, 
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 
-                 importance: int = 3):
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+                 importance: int = 3,
+                 submit_next: bool = True):
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.spacestation = spacestation
         self.docking_port = docking_port
 
@@ -77,7 +78,7 @@ class Docking(Task):
         dic = {
             'spacestation_name': self.spacestation.name,
             'docking_port_num': self.docking_port.num,
-        }
+            }
         return super()._to_dict() | dic
 
     @classmethod
@@ -92,7 +93,8 @@ class Docking(Task):
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
             importance = data['importance'],
-        )
+            submit_next = data['submit_next'],
+            )
 
 
 class Undocking(Task):
@@ -102,8 +104,9 @@ class Undocking(Task):
                  tasks: Tasks, 
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 
-                 importance: int = 3):
-        super().__init__(spacestation, tasks, start_time, duration, importance)
+                 importance: int = 3,
+                 submit_next: bool = True):
+        super().__init__(spacestation, tasks, start_time, duration, importance, submit_next)
         self.spacestation = spacestation
         self.docking_port = docking_port
     
@@ -132,7 +135,7 @@ class Undocking(Task):
         dic = {
             'spacestation_name': self.spacestation.name,
             'docking_port_num': self.docking_port.num,
-        }
+            }
         return super()._to_dict() | dic
 
     @classmethod
@@ -147,5 +150,6 @@ class Undocking(Task):
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
             importance = data['importance'],
-        )
+            submit_next = data['submit_next'],
+            )
         

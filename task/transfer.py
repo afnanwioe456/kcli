@@ -21,9 +21,10 @@ class Transfer(Task):
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 300 * u.s, 
                  importance: int = 6,
+                 submit_next: bool = True,
                  ):
         """瞄准轨道转移规划"""
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.orb_t = orb_t
 
     @property
@@ -38,6 +39,11 @@ class Transfer(Task):
         orb_v = Orbit.from_krpcv(self.vessel)
         mnv = Maneuver.transfer(orb_v, self.orb_t)
         nodes = mnv.to_krpcv(self.vessel)
+        if self.submit_next:
+            self._submit_next_task(nodes)
+        self.conn.close()
+
+    def _submit_next_task(self, nodes):
         mnv_tasks = []
         for n in nodes[:-1]:
             task = ExecuteNode.from_node(
@@ -46,20 +52,19 @@ class Transfer(Task):
                 self.tasks, 
                 importance=self.importance)
             mnv_tasks.append(task)
-        self.tasks.submit_nowait(mnv_tasks)
         orb_cor = self.orb_t.propagate_to_r(self.orb_t.a, M=-1)
         correct_task = CourseCorrect(
             self.spacecraft, 
             self.tasks, 
             self.orb_t, 
             start_time = orb_cor.epoch)
-        self.tasks.submit(correct_task)
-        self.conn.close()
+        mnv_tasks.append(correct_task)
+        self.tasks.submit_nowait(mnv_tasks)
 
     def _to_dict(self):
         dic =  {
             'orb_t': self.orb_t._to_dict()
-        }
+            }
         return super()._to_dict() | dic
     
     @classmethod
@@ -73,7 +78,8 @@ class Transfer(Task):
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
             importance = data['importance'],
-        )
+            submit_next = data['submit_next'],
+            )
 
 
 class CourseCorrect(Task):
@@ -84,9 +90,10 @@ class CourseCorrect(Task):
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 300 * u.s, 
                  importance: int = 6,
+                 submit_next: bool = True,
                  ):
         """轨道修正"""
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.orb_t = orb_t
 
     @property
@@ -103,6 +110,11 @@ class CourseCorrect(Task):
         mnv = Maneuver.course_correction(orb_v, self.orb_t)
         print(mnv)
         nodes = mnv.to_krpcv(self.vessel)
+        if self.submit_next:
+            self._submit_next_task(nodes)
+        self.conn.close()
+
+    def _submit_next_task(self, nodes):
         mnv_tasks = []
         for n in nodes:
             task = ExecuteNode.from_node(
@@ -112,12 +124,11 @@ class CourseCorrect(Task):
                 importance=self.importance)
             mnv_tasks.append(task)
         self.tasks.submit_nowait(mnv_tasks)
-        self.conn.close()
     
     def _to_dict(self):
         dic =  {
             'orb_t': self.orb_t._to_dict()
-        }
+            }
         return super()._to_dict() | dic
     
     @classmethod
@@ -131,4 +142,5 @@ class CourseCorrect(Task):
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
             importance = data['importance'],
-        )
+            submit_next = data['submit_next'],
+            )

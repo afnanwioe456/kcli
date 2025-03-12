@@ -73,7 +73,8 @@ class Orbit(OrbitBase):
         dt = orb.delta_t - self.delta_t
         if prograde and dt < 0:
             dt += self.period
-        dt += M * self.period
+        if not np.isinf(self.period.to_value(u.s)):
+            dt += M * self.period
         orb._epoch = dt + orb._epoch  # 不要使用+=
         return orb
 
@@ -88,19 +89,22 @@ class Orbit(OrbitBase):
         ) * u.rad
         return self.propagate_to_nu(nu, prograde, M)
 
-    @u.quantity_input(nu=u.s)
+    @u.quantity_input(epoch=u.s)
     def is_safe_before(self, epoch):
         if epoch < self.epoch:
             raise ValueError(f'epoch {epoch} is smaller than orbit epoch {self.epoch}')
-        if epoch >= self.period:
+        if epoch - self.epoch >= self.period:
+            # 如果周期数大于1
             return self.is_safe()
         orb = self.propagate_to_epoch(epoch)
-        if orb.nu <= self.nu:
+        if orb.nu < self.nu:
+            # 如果经过了近星点
             return self.is_safe()
-        p = np.pi * u.rad
-        if (abs(p - orb.nu) < abs(p - self.nu)):
-            return self.is_safe(self.nu)
-        return self.is_safe(orb.nu)
+        if 2*np.pi*u.rad - orb.nu < self.nu:
+            # 如果epoch处更接近近星点
+            return orb.is_safe()
+        return self.is_safe(self.nu)
+        
 
     @staticmethod
     @u.quantity_input(
@@ -185,26 +189,26 @@ class Orbit(OrbitBase):
 
 
     @classmethod
-    def from_krpcorb(cls, orbit: KRPCOrbit, ut: u.Quantity | None = None):
+    def from_krpcorb(cls, orbit: KRPCOrbit, epoch: u.Quantity | None = None):
         """从krpc Orbit对象创建Orbit对象
 
         Args:
             orbit (Orbit): krpc Orbit
             ut (Quantity | None): epoch
         """
-        ut = get_ut() if ut is None else ut
-        nu = orbit.true_anomaly_at_ut(ut.to_value(u.s))
+        epoch = get_ut() if epoch is None else epoch
+        nu = orbit.true_anomaly_at_ut(epoch.to_value(u.s))
         if nu < 0:
             nu += 2 * np.pi
         return cls.from_coe(
             BODY_DIC[orbit.body.name],
-            orbit.semi_major_axis * u.m,
+            abs(orbit.semi_major_axis) * u.m,
             orbit.eccentricity * u.one,
             orbit.inclination * u.rad,
             orbit.longitude_of_ascending_node * u.rad,
             orbit.argument_of_periapsis * u.rad,
             nu * u.rad,
-            ut,
+            epoch,
         )
 
     def launch_window(self, 

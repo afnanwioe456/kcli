@@ -40,6 +40,7 @@ class Task:
                  start_time: u.Quantity,
                  duration: u.Quantity,
                  importance: int,
+                 submit_next: bool = True,
                  ):
         self.spacecraft = spacecraft
         self.name = self.spacecraft.name
@@ -47,6 +48,7 @@ class Task:
         self.importance = importance
         self.start_time = start_time
         self.duration = duration
+        self.submit_next = submit_next
 
     @property
     def description(self) -> str:
@@ -77,6 +79,9 @@ class Task:
     def start(self):
         self._conn_setup()
 
+    def _submit_next_task(self):
+        return 
+
     def _to_dict(self):
         return {
             'type': self.__class__.__name__,
@@ -84,13 +89,21 @@ class Task:
             'start_time': self.start_time.to_value(u.s),
             'duration': self.duration.to_value(u.s),
             'importance': self.importance,
-        }
+            'submit_next': self.submit_next,
+            }
 
     @classmethod
     def _from_dict(cls, data, tasks):
         from ..spacecrafts import SpacecraftBase
         s = SpacecraftBase.get(data['spacecraft_name'])
-        return cls(s, tasks, data['start_time'] * u.s, data['duration'] * u.s, data['importance'])
+        return cls(
+            s, 
+            tasks, 
+            data['start_time'] * u.s, 
+            data['duration'] * u.s, 
+            data['importance'],
+            data['submit_next'],
+            )
 
 
 class Tasks:

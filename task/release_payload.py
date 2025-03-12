@@ -5,10 +5,10 @@ from astropy import units as u
 
 from .tasks import Task
 from ..utils import *
+from ..spacecrafts import Spacecraft
 
 if TYPE_CHECKING:
     from .tasks import Tasks
-    from ..spacecrafts import Spacecraft
 
 __all__ = [
     'ReleasePayload',
@@ -22,9 +22,10 @@ class ReleasePayload(Task):
                  start_time: u.Quantity = -1 * u.s,
                  duration: u.Quantity = 180 * u.s,
                  importance: int = 0,
-                 count: int = 1,  # 待分离的载荷数
+                 count: int = 1,
+                 submit_next: bool = True,
                  ):
-        super().__init__(spacecraft, tasks, start_time, duration, importance)
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.count = count
         self.original_name = self.spacecraft._original_name
 
@@ -91,7 +92,7 @@ class ReleasePayload(Task):
     def _to_dict(self):
         dic = {
             'count': self.count,
-        }
+            }
         return super()._to_dict() | dic
     
     @classmethod
@@ -104,7 +105,8 @@ class ReleasePayload(Task):
             duration = data['duration'] * u.s,
             importance = data['importance'],
             count = data['count'],
-        )
+            submit_next = data['submit_next'],
+            )
 
 
 def deploy_solar_panels(vessel: Vessel):
