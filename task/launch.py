@@ -1,5 +1,6 @@
 from __future__ import annotations
 from time import sleep
+from typing import Type
 import krpc
 from astropy import units as u
 
@@ -148,10 +149,10 @@ class Launch(Task):
 
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
+        from ..spacecrafts import Spacecraft
         from ..astro.orbit import Orbit
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
             tasks = tasks,
             orbit = Orbit._from_dict(data['orbit']),
             start_time = data['start_time'] * u.s,

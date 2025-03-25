@@ -1,8 +1,10 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Optional, Type
+from typing import TYPE_CHECKING
 from astropy import units as u
 from dateutil import parser, tz
 from datetime import datetime, timedelta
+import random
+import string
 import logging
 
 import krpc
@@ -10,6 +12,8 @@ import krpc.services
 
 if TYPE_CHECKING:
     from krpc.services.spacecenter import Vessel, Part
+    from .spacecrafts import Spacecraft
+    from .part_extension import PartExt
 
 _DEBUG_MODE = False
 KSP_EPOCH_TIME = -599616000
@@ -69,7 +73,7 @@ def logging_around(func):
             
 ### GLOBAL CONNECTION ###
 
-UTIL_CONN = None if _DEBUG_MODE else krpc.connect('krpclive', address='127.0.0.1', rpc_port=65534, stream_port=65535)
+UTIL_CONN = None if _DEBUG_MODE else krpc.connect('kcli')
 
 ### IN-GAME TIME CONTROL ###
 
@@ -192,10 +196,13 @@ def get_new_vessels(past_vessels, current_vessels) -> list[Vessel]:
     return target_vessels
 
 
-def switch_to_vessel(name):
-    sc = UTIL_CONN.space_center
-    target = get_vessel_by_name(name)
+def switch_to_vessel(v: Vessel | str):
+    if isinstance(v, str):
+        target = get_vessel_by_name(v)
+    else:
+        target = v
     if target:
+        sc = UTIL_CONN.space_center
         sc.active_vessel = target
         # KSP有时切换后会莫名其妙多出无用分级
         # 如果当前分级没有激活部件:
@@ -210,7 +217,7 @@ def get_vessel_by_name(name):
     for v in vessels:
         if v.name == name:
             return v
-    LOGGER.debug(f'{name}: 载具不存在!')
+    return None
 
 
 def get_parts_in_stage_by_type(vessel: Vessel, target: str, stage: int) -> list[Part]:
@@ -220,6 +227,114 @@ def get_parts_in_stage_by_type(vessel: Vessel, target: str, stage: int) -> list[
         if getattr(i, target):
             part_list.append(i)
     return part_list
+
+### PART_ID ###
+
+def temp_switch_to_vessel(func):
+    def wrapper(*args, **kwargs):
+        before = UTIL_CONN.space_center.active_vessel
+        temp: Vessel = kwargs['vessel']
+        if before.name != temp.name:
+            switch_to_vessel(temp)
+        res = func(*args, **kwargs)
+        if before.name != temp.name:
+            switch_to_vessel(before)
+        return res
+    return wrapper
+
+def generate_pid():
+    chars = string.ascii_letters + string.digits
+    return ''.join(random.choices(chars, k=12))
+
+def get_part_id(part: Part):
+    return _get_part_id(part, vessel=part.vessel)
+
+@temp_switch_to_vessel
+def _get_part_id(part: Part, vessel: Vessel):
+    tags = part.tag.split()
+    try:
+        i = tags.index('--pid')
+    except ValueError:
+        return None
+    return tags[i+1]
+
+def assign_part_id(part: Part):
+    if not part.tag:
+        return
+    return _assign_part_id(part, vessel=part.vessel)
+
+@temp_switch_to_vessel
+def _assign_part_id(part: Part, vessel: Vessel):
+    _id = get_part_id(part)
+    if _id is not None:
+        return _id
+    _id = generate_pid()
+    part.tag = part.tag + ' --pid ' + _id
+    return _id
+
+def get_part_by_pid(v: Vessel, id: str):
+    """按id寻找Part, 注意这将会搜寻整个vessel"""
+#     return _get_part_by_pid(v, id, vessel=v)
+# @temp_switch_to_vessel
+# def _get_part_by_pid(v: Vessel, id: str, vessel: Vessel):
+    cur = v.parts.root
+    stack = [cur]
+    while stack:
+        cur = stack.pop()
+        if get_part_id(cur) == id:
+            return cur
+        stack += cur.children
+    return None
+
+def get_root_part(spacecraft: Spacecraft) -> Part:
+    return _get_root_part(spacecraft, vessel=spacecraft.vessel)
+
+@temp_switch_to_vessel
+def _get_root_part(spacecraft: Spacecraft, vessel: Vessel) -> Part:
+    if spacecraft.docked_with is None:
+        root = spacecraft.vessel.parts.root
+    else:
+        dp_ex = spacecraft.docking_port_ext_docked_at
+        root = dp_ex.part.docking_port.docked_part
+    return root
+    
+def get_tagged_children_parts(root: Part) -> list[Part]:
+    """返回以root为根部件的所有有tag标记的part, 
+    注意只会搜索spacecraft范围而非整个vessel"""
+    return _get_tagged_children_parts(root, vessel=root.vessel)
+
+@temp_switch_to_vessel
+def _get_tagged_children_parts(root: Part, vessel: Vessel) -> list[Part]:
+    from .part_extension import _part_tag_docopt
+    res = []
+    stack = [root]
+    while stack:
+        cur = stack.pop()
+        if cur.tag:
+            res.append(cur)
+            if _part_tag_docopt(cur)['--docking_port']:
+                # 不搜索与其对接的spacecraft
+                for p in cur.children:
+                    if p.docking_port:
+                        continue
+                    stack.append(p)
+                continue
+        stack += cur.children
+    return res
+
+def assign_part_to_exts(spacecraft: Spacecraft, ext_dict: dict[str, PartExt]):
+    return _assign_part_to_exts(spacecraft, ext_dict, vessel=spacecraft.vessel)
+
+@temp_switch_to_vessel
+def _assign_part_to_exts(spacecraft: Spacecraft, ext_dict: dict[str, PartExt], vessel: Vessel):
+    root = get_root_part(spacecraft)
+    stack = [root]
+    while stack:
+        cur = stack.pop()
+        part_id = get_part_id(cur)
+        if part_id and part_id in ext_dict:
+            ext_dict[part_id]._part = cur
+        stack += cur.children
 
 ### ABORT ###
 

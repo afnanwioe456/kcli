@@ -10,12 +10,12 @@ from ..utils import *
 
 if TYPE_CHECKING:
     from .tasks import Tasks
-    from ..spacecrafts import SpacecraftBase
+    from ..spacecrafts import Spacecraft
 
 
 class Transfer(Task):
     def __init__(self, 
-                 spacecraft: SpacecraftBase, 
+                 spacecraft: Spacecraft, 
                  tasks: Tasks, 
                  orb_t: Orbit,
                  start_time: u.Quantity = -1 * u.s, 
@@ -69,10 +69,10 @@ class Transfer(Task):
     
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
+        from ..spacecrafts import Spacecraft
         from ..astro.orbit import Orbit
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
             tasks = tasks,
             orb_t = Orbit._from_dict(data['orb_t']),
             start_time = data['start_time'] * u.s,
@@ -84,7 +84,7 @@ class Transfer(Task):
 
 class CourseCorrect(Task):
     def __init__(self, 
-                 spacecraft: SpacecraftBase, 
+                 spacecraft: Spacecraft, 
                  tasks: Tasks, 
                  orb_t: Orbit,
                  start_time: u.Quantity = -1 * u.s, 
@@ -133,10 +133,10 @@ class CourseCorrect(Task):
     
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
+        from ..spacecrafts import Spacecraft
         from ..astro.orbit import Orbit
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
             tasks = tasks,
             orb_t = Orbit._from_dict(data['orb_t']),
             start_time = data['start_time'] * u.s,

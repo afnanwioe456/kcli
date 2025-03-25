@@ -10,17 +10,18 @@ from ..utils import *
 
 if TYPE_CHECKING:
     from .tasks import Tasks
-    from ..spacecrafts import SpacecraftBase
+    from ..spacecrafts import Spacecraft
+    from ..astro.body import Body
+
 
 __all__ = [
     'GlideLanding',
-    'ControlledReentry',
 ]
 
 
 class GlideLanding(Task):
     def __init__(self, 
-                 spacecraft: SpacecraftBase, 
+                 spacecraft: Spacecraft, 
                  tasks: Tasks, 
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 
@@ -63,16 +64,20 @@ class GlideLanding(Task):
         self.vessel.control.sas_mode = SASMode.retrograde
         self.sc.physics_warp_factor = 3
         recover_stream = self.conn.add_stream(getattr, self.vessel, 'recoverable')
-        while not recover_stream():
+        mass_stream = self.conn.add_stream(getattr, self.vessel, 'mass')
+        while not recover_stream() or mass_stream > 0:
             sleep(1)
-        self.vessel.recover()
+        if self.vessel.recoverable:
+            self.vessel.recover()
         dummy_roll_out()
         self.conn.close()
 
-        
-class ControlledReentry(Task):
+
+class Landing(Task):
     def __init__(self, 
-                 spacecraft: SpacecraftBase, 
+                 spacecraft: Spacecraft, 
+                 body: Body,
+                 coordinate: tuple[float],
                  tasks: Tasks, 
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 
@@ -80,29 +85,3 @@ class ControlledReentry(Task):
                  submit_next: bool = True,
                  ):
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
-
-    @property
-    def description(self):
-        return (f'{self.name} -> 受控再入'
-                f'\t预计执行时: {sec_to_date(self.start_time)}')
-
-    @logging_around
-    def start(self):
-        if not self._conn_setup():
-            return
-        krpc_orb = self.vessel.orbit
-        orbv = Orbit.from_krpcorb(krpc_orb)
-        # TODO
-        while orbv.pe > orbv.attractor.atomsphere_height:
-            krpc_orb = krpc_orb.next_orbit
-            if krpc_orb is None:
-                raise ValueError(f'{self.name} not on a reentry orbit.')
-            orbv = Orbit.from_krpcorb(krpc_orb)
-        orb_reentry = orbv.propagate_to_r(orbv.attractor.r + orbv.attractor.atomsphere_height, sign=False)
-        time_wrap(orb_reentry.epoch)
-        self.sc.physics_warp_factor = 3
-        mass_stream = self.conn.add_stream(getattr, self.vessel, 'mass')
-        while mass_stream() > 0:
-            sleep(1)
-        dummy_roll_out()
-        self.conn.close()

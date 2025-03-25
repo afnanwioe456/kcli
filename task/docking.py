@@ -5,7 +5,7 @@ from astropy import units as u
 
 from .tasks import Task
 from ..autopilot import get_closer
-from ..utils import LOGGER, sec_to_date, logging_around
+from ..utils import *
 
 if TYPE_CHECKING:
     from krpc.client import Client
@@ -18,14 +18,14 @@ __all__ = [
 ]
 
 
-def docking_with_target(conn: Client, ss: SpaceStation, docking_port: DockingPortStatus):
+def _dock_with_target(conn: Client, ss: SpaceStation, docking_port: DockingPortExt):
     conn.space_center.target_vessel = ss.vessel
     sc = conn.space_center
     mj = conn.mech_jeb
     active = sc.active_vessel
     parts = active.parts
     parts.controlling = parts.docking_ports[0].part
-    sc.target_docking_port = docking_port.part
+    sc.target_docking_port = docking_port.part.docking_port
 
     docking = mj.docking_autopilot
     docking.speed_limit = 10
@@ -37,9 +37,8 @@ def docking_with_target(conn: Client, ss: SpaceStation, docking_port: DockingPor
 
 class Docking(Task):
     def __init__(self, 
-                 spacecraft: SpacecraftBase, 
+                 spacecraft: Spacecraft, 
                  spacestation: SpaceStation,
-                 docking_port: DockingPortStatus,
                  tasks: Tasks, 
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 
@@ -47,48 +46,48 @@ class Docking(Task):
                  submit_next: bool = True):
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.spacestation = spacestation
-        self.docking_port = docking_port
 
     @property
     def description(self):
-        return (f'{self.name} -> {self.spacestation.name} 对接\n'
+        return (f'{self.name} -> 对接 -> {self.spacestation.name}\n'
                 f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
     def start(self):
-        if self.docking_port.is_docked():
-            LOGGER.debug(f'{self.spacestation} docking port [{self.docking_port.num}] is docked with {self.docking_port.docked_with},'
-                         f'initializing return task.')
-            ss: SpaceStation = self.docking_port.spacecraft
-            return_tasks = ss.return_mission(self.docking_port, self.tasks)
-            self.tasks.submit_nowait(return_tasks[:-2] + [self] + return_tasks[-2:])
+        UTIL_CONN.space_center.target_vessel = self.spacestation.vessel
+        target_dpext = self.spacestation.part_exts.get_target_docking_port(
+            self.spacecraft.part_exts.active_docking_port_ext)
+        if target_dpext.is_docked():
+            LOGGER.debug(f'{self.spacestation} docking port [{target_dpext.part_id}] '
+                         f'is docked with {target_dpext.docked_with}, initializing return task.')
+            return_tasks = self.spacestation.return_mission(target_dpext, self.tasks)
+            self.tasks.submit_nowait(return_tasks[0] + [self] + return_tasks[1:])
             return
         if not self._conn_setup():
-            return False
+            return
         dis = 50
-        self.spacecraft.rcs = True
+        self.spacecraft.part_exts.rcs = True
+        self.spacecraft.part_exts.main_engines = True
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} getting closer: {dis}')
         get_closer(dis, self.vessel, self.spacestation.vessel)
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking')
-        docking_with_target(self.conn, self.spacestation, self.docking_port)
+        _dock_with_target(self.conn, self.spacestation, target_dpext)
         LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking completed')
         self.conn.close()
     
     def _to_dict(self):
         dic = {
             'spacestation_name': self.spacestation.name,
-            'docking_port_num': self.docking_port.num,
             }
         return super()._to_dict() | dic
 
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
-        ss: SpaceStation = SpacecraftBase.get(data['spacestation_name'])
+        from ..spacecrafts import Spacecraft
+        ss: SpaceStation = Spacecraft.get(data['spacestation_name'])
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
             spacestation = ss,
-            docking_port = ss.get_docking_port(data['docking_port_num']),
             tasks = tasks,
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
@@ -99,30 +98,26 @@ class Docking(Task):
 
 class Undocking(Task):
     def __init__(self, 
-                 spacestation: SpaceStation,
-                 docking_port: DockingPortStatus,
+                 spacecraft: Spacecraft,
                  tasks: Tasks, 
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 
                  importance: int = 3,
                  submit_next: bool = True):
-        super().__init__(spacestation, tasks, start_time, duration, importance, submit_next)
-        self.spacestation = spacestation
-        self.docking_port = docking_port
+        super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
     
     @property
     def description(self):
-        return (f'{self.spacestation}对接口[{self.docking_port.num}] -> 对接分离\n'
+        return (f'{self.spacecraft.docked_with} -> 对接分离 -> {self.spacecraft}\n'
                 f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
     def start(self):
         if not self._conn_setup():
             return False
-        s = self.docking_port.undock()
-        self.spacecraft = s
+        self.spacecraft.undock()
         sleep(3)
-        v = s.vessel
+        v = self.spacecraft.vessel
         self.conn.space_center.active_vessel = v
         v.control.rcs = True
         v.control.forward = -0.5
@@ -130,26 +125,3 @@ class Undocking(Task):
         v.control.forward = 0
         v.control.rcs = False
         self.conn.close()
-
-    def _to_dict(self):
-        dic = {
-            'spacestation_name': self.spacestation.name,
-            'docking_port_num': self.docking_port.num,
-            }
-        return super()._to_dict() | dic
-
-    @classmethod
-    def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
-        ss: SpaceStation = SpacecraftBase.get(data['spacestation_name'])
-        return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
-            spacestation = ss,
-            docking_port = ss.get_docking_port(data['docking_port_num']),
-            tasks = tasks,
-            start_time = data['start_time'] * u.s,
-            duration = data['duration'] * u.s,
-            importance = data['importance'],
-            submit_next = data['submit_next'],
-            )
-        

@@ -8,7 +8,7 @@ from ..utils import *
 
 if TYPE_CHECKING:
     from command import ChatMsg
-    from ..spacecrafts import SpacecraftBase
+    from ..spacecrafts import Spacecraft
     
 __all__ = [
     'MAX_IMPORTANCE',
@@ -23,7 +23,7 @@ IMPORTANCE:
 0: 弹幕普通发射任务 
 1: 弹幕高优先级发射任务
 2: 弹幕紧急发射任务
-3: 对接
+3: 对接, 资源转移
 4: 
 5: 默认优先级
 6: 默认交会规划, 转移规划
@@ -35,7 +35,7 @@ IMPORTANCE:
 
 class Task:
     def __init__(self,
-                 spacecraft: SpacecraftBase,
+                 spacecraft: Spacecraft,
                  tasks: Tasks,
                  start_time: u.Quantity,
                  duration: u.Quantity,
@@ -66,7 +66,7 @@ class Task:
 
     def _conn_setup(self):
         self.vessel = self.spacecraft.vessel
-        if not switch_to_vessel(self.vessel.name):
+        if not switch_to_vessel(self.vessel):
             return False
         self.conn = krpc.connect(self.name)
         self.sc = self.conn.space_center
@@ -84,7 +84,7 @@ class Task:
 
     def _to_dict(self):
         return {
-            'type': self.__class__.__name__,
+            '_class_name': self.__class__.__name__,
             'spacecraft_name': self.spacecraft.name,
             'start_time': self.start_time.to_value(u.s),
             'duration': self.duration.to_value(u.s),
@@ -94,8 +94,8 @@ class Task:
 
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
-        s = SpacecraftBase.get(data['spacecraft_name'])
+        from ..spacecrafts import Spacecraft
+        s = Spacecraft.get(data['spacecraft_name'])
         return cls(
             s, 
             tasks, 
@@ -150,7 +150,7 @@ class Tasks:
                f"{self.current_task.description}")
         LOGGER.debug(log)
         self.current_task.start()
-        log = (f"Tasks [{self._id}] finished @ {threading.current_thread().name}\n")
+        log = (f"Tasks [{self._id}] finished @ {threading.current_thread().name}")
         LOGGER.debug(log)
         if self.abort_flag:
             log = (f"任务中止:\n{self.msg.chat_text} @ {self.msg.user_name}\n"
@@ -190,13 +190,12 @@ class Tasks:
         msg = ChatMsg._from_dict(data['msg'])
         ret = cls(msg)
         for d in data['_task_list']:
-            cls_ = getattr(task, d['type'], None)
+            cls_ = getattr(task, d['_class_name'], None)
             if cls_ and issubclass(cls_, Task):
                 ret._task_list.append(cls_._from_dict(d, ret))
             else:
-                raise ValueError(f'Unknown or invalid class type: {d["type"]}')
+                raise ValueError(f'Unknown or invalid class: {d["_class_name"]}')
         return ret
-        
 
 
 class TaskNode:
@@ -378,19 +377,3 @@ class TaskQueue:
     @classmethod
     def info(cls):
         return str(cls())
-
-    @classmethod
-    def dump_all(cls):
-        task_list = []
-        with cls._queue_condition:
-            while cls._size > 0:
-                task_list.append(cls.get()._to_dict())
-        return task_list
-
-    @classmethod
-    def load_all(cls, data):
-        if cls._size > 0:
-            LOGGER.warning(f'TaskQueue非空!')
-            cls.clear()
-        for t in data:
-            cls.put(Tasks._from_dict(t))

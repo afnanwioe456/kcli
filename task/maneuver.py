@@ -10,7 +10,7 @@ from ..utils import *
 
 if TYPE_CHECKING:
     from .tasks import Tasks
-    from ..spacecrafts import SpacecraftBase
+    from ..spacecrafts import Spacecraft
     from krpc.services.spacecenter import Vessel, Node
 
 __all__ = [
@@ -22,7 +22,7 @@ __all__ = [
 
 class SimpleMnv(Task):
     def __init__(self,
-                 spacecraft: SpacecraftBase,
+                 spacecraft: Spacecraft,
                  tasks: Tasks,
                  mode: str,
                  target: u.Quantity,
@@ -99,10 +99,10 @@ class SimpleMnv(Task):
 
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
+        from ..spacecrafts import Spacecraft
         mode = data['mode']
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
             tasks = tasks,
             mode = mode,
             target = data['target'] * u.deg if mode == 'inc' else data['target'] * u.km,
@@ -117,7 +117,7 @@ class SimpleMnv(Task):
 
 class CaptureMnv(Task):
     def __init__(self, 
-                 spacecraft: SpacecraftBase, 
+                 spacecraft: Spacecraft, 
                  tasks: Tasks, 
                  orb_t: Orbit,
                  ap_t: u.Quantity,
@@ -169,10 +169,10 @@ class CaptureMnv(Task):
     
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
+        from ..spacecrafts import Spacecraft
         from ..astro.orbit import Orbit
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
             tasks = tasks,
             orb_t = Orbit._from_dict(data['orb_t']),
             ap_t = data['ap_t'] * u.km,
@@ -185,7 +185,7 @@ class CaptureMnv(Task):
         
 class ExecuteNode(Task):
     def __init__(self, 
-                 spacecraft: SpacecraftBase, 
+                 spacecraft: Spacecraft, 
                  tasks: Tasks, 
                  burn_time: u.Quantity,
                  start_time: u.Quantity = -1 * u.s, 
@@ -211,22 +211,22 @@ class ExecuteNode(Task):
         if not self._conn_setup():
             return
         if self.burn_time > 3 * u.s:
-            self.spacecraft.main_engine = True
+            self.spacecraft.part_exts.main_engines = True
         else:
-            self.spacecraft.main_engine = False
-        self.spacecraft.rcs = True
+            self.spacecraft.part_exts.main_engines = False
+        self.spacecraft.part_exts.rcs = True
         self.executor = self.mj.node_executor
         self.executor.autowarp = True
         self.executor.tolerance = self.tol
         self.executor.execute_one_node()
         while not self.tasks.abort_flag and self.executor.enabled:
             sleep(5)
-        self.spacecraft.rcs = False
+        self.spacecraft.part_exts.rcs = False
         self.conn.close()
 
     @classmethod
     def from_node(cls, 
-                  spacecraft: SpacecraftBase, 
+                  spacecraft: Spacecraft, 
                   node: Node, 
                   tasks: Tasks, 
                   importance: int = 7, 
@@ -235,7 +235,11 @@ class ExecuteNode(Task):
                   ):
         """执行节点"""
         v = spacecraft.vessel
-        burn_time = compute_burn_time(node.delta_v, spacecraft.main_engine, v.mass)
+        burn_time = compute_burn_time(
+            node.delta_v, 
+            spacecraft.part_exts.main_engines, 
+            v.mass
+            )
         return cls(
             spacecraft = spacecraft, 
             tasks = tasks, 
@@ -256,9 +260,9 @@ class ExecuteNode(Task):
     
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
+        from ..spacecrafts import Spacecraft
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
             tasks = tasks,
             burn_time = data['burn_time'] * u.s,
             start_time = data['start_time'] * u.s,

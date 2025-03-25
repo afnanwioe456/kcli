@@ -11,7 +11,7 @@ from ..utils import sec_to_date, logging_around
 if TYPE_CHECKING:
     from .tasks import Tasks
     from ..spacecrafts import SpaceStation
-    from ..spacecrafts import SpacecraftBase
+    from ..spacecrafts import Spacecraft
 
 __all__ = [
     'Rendezvous',
@@ -20,7 +20,7 @@ __all__ = [
 
 class Rendezvous(Task):
     def __init__(self,
-                 spacecraft: SpacecraftBase,
+                 spacecraft: Spacecraft,
                  spacestation: SpaceStation,
                  tasks: Tasks,
                  start_time: u.Quantity = -1 * u.s,
@@ -66,10 +66,10 @@ class Rendezvous(Task):
     
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
+        from ..spacecrafts import Spacecraft
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
-            spacestation = SpacecraftBase.get(data['spacestation_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
+            spacestation = Spacecraft.get(data['spacestation_name']),
             tasks = tasks,
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,

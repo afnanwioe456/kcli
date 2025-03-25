@@ -97,9 +97,9 @@ class ReleasePayload(Task):
     
     @classmethod
     def _from_dict(cls, data, tasks):
-        from ..spacecrafts import SpacecraftBase
+        from ..spacecrafts import Spacecraft
         return cls(
-            spacecraft = SpacecraftBase.get(data['spacecraft_name']),
+            spacecraft = Spacecraft.get(data['spacecraft_name']),
             tasks = tasks,
             start_time = data['start_time'] * u.s,
             duration = data['duration'] * u.s,
