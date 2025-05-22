@@ -14,11 +14,12 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
     sc = UTIL_CONN.space_center
     set_point = distance
     a_limit = -vessel.available_rcs_force[1][1] / vessel.mass * 0.8
+    s_decay = 20
     # TODO: rcs_force没有考虑limit设置，只是单纯的最大值
     ref_v_orb = vessel.orbital_reference_frame
     ref_v = vessel.reference_frame
     Kp = np.array([1, 1, 1])
-    Ki = np.array([0.05, 0.05, 0.05])
+    Ki = np.array([0, 0, 0])
     Kd = np.array([0.1, 0.1, 0.1])
     pid_d = PIDVController(Kp, Ki, Kd)
     prev_time = sc.ut
@@ -45,7 +46,8 @@ def get_closer(distance: float, vessel: Vessel, target: Vessel, rate: float = 0.
         dd = d - set_point
         dd_abs = abs(dd)
         s_target = dd / dd_abs * (2 * a_limit * dd_abs) ** 0.5
-        s_target = s_target * smooth_step(s_target, 10)  # 20m/s以内快速衰减避免过冲
+        # 低于s_decay时快速衰减避免过冲
+        s_target = s_target * (1 - max(0, s_decay - s_target) / s_decay)
         v_target = position / d * s_target
         dv = v_target - velocity
 

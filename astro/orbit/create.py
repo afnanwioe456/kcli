@@ -30,7 +30,7 @@ class Orbit(OrbitBase):
         dt = t.to_value(u.s)
         r_vec = self.r_vec.to_value(u.km)
         v_vec = self.v_vec.to_value(u.km / u.s)
-        k = self.attractor.k.to_value(u.km ** 3 / u.s ** 2)
+        k = self.attractor.mu.to_value(u.km ** 3 / u.s ** 2)
         r1_vec, v1_vec = rv2rv_delta_t(r_vec, v_vec, dt, k, tol, max_iter)
         return self.from_rv(
             self.attractor,
@@ -71,11 +71,12 @@ class Orbit(OrbitBase):
         orb = Orbit.from_coe(self.attractor, self.a, self.e, self.inc, 
                              self.raan, self.argp, nu, self.epoch)
         dt = orb.delta_t - self.delta_t
+        if (dt < 0 or M != 0) and np.isinf(self.period.to_value(u.s)):
+            raise ValueError()
         if prograde and dt < 0:
             dt += self.period
-        if not np.isinf(self.period.to_value(u.s)):
-            dt += M * self.period
-        orb._epoch = dt + orb._epoch  # 不要使用+=
+        dt += M * self.period
+        orb._epoch = dt + orb._epoch
         return orb
 
     @u.quantity_input(r=u.km)
@@ -84,7 +85,7 @@ class Orbit(OrbitBase):
             r.to_value(u.km),
             self.h.to_value(u.km ** 2 / u.s),
             self.e.to_value(u.one),
-            self.attractor.k.to_value(u.km ** 3 / u.s ** 2),
+            self.attractor.mu.to_value(u.km ** 3 / u.s ** 2),
             sign
         ) * u.rad
         return self.propagate_to_nu(nu, prograde, M)
@@ -198,11 +199,10 @@ class Orbit(OrbitBase):
         """
         epoch = get_ut() if epoch is None else epoch
         nu = orbit.true_anomaly_at_ut(epoch.to_value(u.s))
-        if nu < 0:
-            nu += 2 * np.pi
+        nu = nu % (2 * np.pi)
         return cls.from_coe(
             BODY_DIC[orbit.body.name],
-            abs(orbit.semi_major_axis) * u.m,
+            orbit.semi_major_axis * u.m,
             orbit.eccentricity * u.one,
             orbit.inclination * u.rad,
             orbit.longitude_of_ascending_node * u.rad,
@@ -215,6 +215,7 @@ class Orbit(OrbitBase):
                       site_p: np.ndarray, 
                       direction: str = 'SE', 
                       cloest: bool = False, 
+                      search: bool = True,
                       min_phase: u.Quantity = 10 * u.deg, 
                       max_phase: u.Quantity = 30 * u.deg,
                       start_time: u.Quantity = None, 
@@ -225,6 +226,7 @@ class Orbit(OrbitBase):
             site_p (ndarray): 发射场位置矢量, 惯性系
             direction (str): 发射方向. Defaults to 'SE'.
             cloest (bool): 返回最近的窗口. Defaults to False.
+            search (bool): 搜索最佳窗口. Defaults to True.
             min_phase (int, optional): 最小相位差. Defaults to 10.
             max_phase (int, optional): 最大相位差. Defaults to 30.
             start_time (Quantity, optional): 搜索开始时间. Defaults to None.
@@ -235,17 +237,11 @@ class Orbit(OrbitBase):
         """
         if start_time is None or end_time is None:
             start_time = self.epoch
-            end_time = self.epoch + KSP_Earth.rotational_period * 30
+            end_time = self.epoch + self.attractor.rotational_period * 10
         ut = orbit_launch_window(
-            self, 
-            site_p, 
-            direction, 
-            cloest, 
-            min_phase, 
-            max_phase, 
-            start_time, 
-            end_time
-            )
+            self, site_p, direction, cloest, search,
+            min_phase, max_phase, start_time, end_time
+        )
         return ut
 
     def cheat(self, ut=None):

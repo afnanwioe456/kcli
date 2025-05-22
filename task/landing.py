@@ -77,7 +77,7 @@ class Landing(Task):
     def __init__(self, 
                  spacecraft: Spacecraft, 
                  body: Body,
-                 coordinate: tuple[float],
+                 landing_site: tuple[float],
                  tasks: Tasks, 
                  start_time: u.Quantity = -1 * u.s, 
                  duration: u.Quantity = 1800 * u.s, 

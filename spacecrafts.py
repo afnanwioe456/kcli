@@ -41,6 +41,14 @@ class Spacecraft:
     @classmethod
     def get(cls, name) -> Spacecraft:
         return cls._instances.get(name, None)
+    
+    @final
+    @classmethod
+    def get_or_create(cls, name) -> Spacecraft:
+        s = cls._instances.get(name, None)
+        if s is None:
+            s = cls(name)
+        return s
         
     def delete(self):
         Spacecraft._instances.pop(self.name, None)

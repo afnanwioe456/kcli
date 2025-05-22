@@ -8,7 +8,7 @@ from .lambert_solver import *
 from .moon_transfer import *
 from .planner import *
 from ..orbit import Orbit
-from ..frame import OrbitalFrame, BCI
+from ..frame import OrbitalFrame, BCIFrame
 
 if TYPE_CHECKING:
     from ..body import *
@@ -22,7 +22,7 @@ class Maneuver:
             impulses (list[tuple]): 脉冲机动, [(dt, ndarray[v0, v1, v2]), ...]
             orbit (Orbit): 初始轨道
         """
-        self._impulses = impulses
+        self._impulses: list[tuple[u.Quantity]] = impulses
         self._orbit = orbit
 
     def __getitem__(self, key):
@@ -62,7 +62,15 @@ class Maneuver:
             self._impulses += mnv._impulses
         return self
 
-    def get_total_cost(self):
+    @staticmethod
+    def serial(orbit: Orbit, mnvs: list[Maneuver]):
+        res = mnvs[0].change_orbit(orbit)
+        for i in range(1, len(mnvs)):
+            mnv = mnvs[i].change_orbit(orbit)
+            res = res.merge(mnv)
+        return res
+
+    def get_total_cost(self) -> u.Quantity:
         total = 0
         for i in self._impulses:
             total += np.linalg.norm(i[1])
@@ -123,18 +131,18 @@ class Maneuver:
         nodes = vessel.control.nodes
         impulses = []
         for n in nodes:
-            burn_vector = BCI.transform_d_from_left_hand(n.burn_vector(vessel.orbit.body.non_rotating_reference_frame))
+            burn_vector = BCIFrame.transform_d_from_left_hand(n.burn_vector(vessel.orbit.body.non_rotating_reference_frame))
             impulses.append(((n.ut - epoch) * u.s, np.array(burn_vector) * u.m / u.s))
         return Maneuver(impulses, orb)
 
     @staticmethod
-    def change_apoapsis(orbit: Orbit, ap: u.Quantity):
-        imps = apoapsis_planner(orbit, ap)
+    def change_apoapsis(orbit: Orbit, ap: u.Quantity, immediate: bool = False):
+        imps = apoapsis_planner(orbit, ap, immediate)
         return Maneuver(imps, orbit)
 
     @staticmethod
-    def change_periapsis(orbit: Orbit, pe: u.Quantity):
-        imps = periapsis_planner(orbit, pe)
+    def change_periapsis(orbit: Orbit, pe: u.Quantity, immediate: bool = False):
+        imps = periapsis_planner(orbit, pe, immediate)
         return Maneuver(imps, orbit)
 
     @staticmethod
@@ -268,6 +276,7 @@ class Maneuver:
         Returns:
             Orbit: 转移瞄准轨道
         """
+        raise NotImplementedError()  # 废弃
         orb_target = transfer_target(orb_v, moon, cap_t, pe, inc, relative=relative)
         orb_transfer = orb_target.propagate_to_nu(0*u.rad, True, -1)
         if orb_transfer.epoch < orb_v.epoch:
@@ -298,7 +307,7 @@ class Maneuver:
         orb_target = transfer_orbit_target(orb_v, orb_t, cap_t, rp_t=rp_t)
         orb_transfer = orb_target.propagate_to_nu(0*u.rad, prograde=True, M=-1)
         if orb_transfer.epoch < orb_v.epoch:
-            cap_t += orb_v.epoch - orb_transfer.epoch + 600 * u.s
+            cap_t += orb_t.attractor.rotational_period / 2
             warnings.warn(f'orbit already passed transfer window, trying capture time {cap_t}', RuntimeWarning)
             return cls.moon_orbit_transfer_target(orb_v, orb_t, cap_t)
         return orb_target

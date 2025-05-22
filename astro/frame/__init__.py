@@ -1,5 +1,6 @@
 from .create import (
-    BCI,
+    BCIFrame,
+    ENUFrame,
     TNWFrame,
     OrbitalFrame,
     LocalAttitudeFrame,
@@ -7,7 +8,8 @@ from .create import (
 )
 
 __all__ = [
-    'BCI',
+    'BCIFrame',
+    'ENUFrame',
     'TNWFrame',
     'OrbitalFrame',
     'LocalAttitudeFrame',

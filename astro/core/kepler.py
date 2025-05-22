@@ -7,27 +7,26 @@ from .rotation import *
 
 @njit
 def nu2r(nu, h, e, GM):
-    if cos(nu) <= -1 / e:
+    denom = 1 + e * cos(nu)
+    if abs(denom) < 1e-10:
         return inf
-    return h ** 2 / GM / (1 + e * cos(nu))
+    return h ** 2 / (GM * denom)
 
 @njit
 def r2nu(r, h, e, GM, sign=True):
+    if e < 1e-10:
+        return 0
     nu = arccos((h ** 2 / GM / r - 1) / e)
     if not sign:
         nu = 2 * pi - nu
     return nu
 
 @njit
-def r2v(r, a, GM, e):
-    if e > 1:
-        a = -a
+def r2v(r, a, GM):
     return sqrt(- GM / a + 2 * GM / r)
 
 @njit
-def v2r(v, a, GM, e):
-    if e > 1:
-        a = -a
+def v2r(v, a, GM):
     return 2 * GM / (v ** 2 + GM / a)
 
 @njit
@@ -39,7 +38,7 @@ def T(a, GM):
 def T2v(T, r, GM):
     """根据椭圆轨道周期和半径求速度"""
     a = (T * sqrt(GM) / (2 * pi)) ** (2 / 3)
-    return r2v(r, a, GM, 0)
+    return r2v(r, a, GM)
 
 @njit
 def nu2E(nu, e):
@@ -155,13 +154,13 @@ def rv2uni_nu(r, vr, dt, alpha, GM, tol=1e-8, max_iter=100):
 
 @njit
 def h2a(h, GM, e):
-    return h ** 2 / GM / abs(1 - e ** 2)
+    return h ** 2 / GM / (1 - e ** 2)
 
 @njit
 def a2h(a, GM, e):
-    return sqrt(a * GM * abs(e ** 2 - 1))
+    s = a * GM * (1 - e ** 2)
+    return sqrt(s)
 
-@njit
 def rv2coe(r_vec, v_vec, GM):
     """由状态向量计算经典轨道根数(h, e, inc, raan, argp, nu)"""
     r = norm(r_vec)
