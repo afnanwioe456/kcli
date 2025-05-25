@@ -139,9 +139,6 @@ class Command:
             LOGGER.warning(f'@{self.msg.user_id} 无法解析指令, 使用"!launch -h"指令查看发射指令帮助.')
             return
 
-        name = args['--name'] if args['--name'] else (f'{self.msg.user_name}的载荷')
-        name = vessel_namer(name)
-
         rocket = args['--rocket']
         executor = LAUNCH_ROCKET_DIC.get(rocket, None)
         if not executor:
@@ -173,7 +170,11 @@ class Command:
 
         inc = args['--inclination']
         priority = args['--priority']
-        start_time = date_to_sec(args['--time']) if args['--time'] else -1 * u.s
+        start_time = date_to_sec(args['--time']) if args['--time'] else -1
+
+        name = args['--name'] if args['--name'] else (f'{self.msg.user_name}的载荷')
+        # 最后再处理name防止内存泄漏
+        name = Spacecraft(name).name
 
         self.tasks = Tasks(self.msg)
         self.tasks.submit(executor(

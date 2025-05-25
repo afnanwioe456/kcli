@@ -1,8 +1,5 @@
 from __future__ import annotations
-from functools import cached_property
-from typing import final
-import threading
-from astropy import units as u
+import numpy as np
 
 from .utils import *
 from .astro.orbit import Orbit
@@ -37,12 +34,10 @@ class Spacecraft:
         tail += 1
         return f'{name} #{tail}', tail
 
-    @final
     @classmethod
     def get(cls, name) -> Spacecraft:
         return cls._instances.get(name, None)
     
-    @final
     @classmethod
     def get_or_create(cls, name) -> Spacecraft:
         s = cls._instances.get(name, None)
@@ -98,40 +93,43 @@ class Spacecraft:
 
     def _to_dict(self):
         return {
-            'name': self.name,
-            '_class_name': self.__class__.__name__,
-            '_original_name': self._original_name,
-            '_tail': self._tail,
-            '_docked_with_name': self._docked_with_name,
-            '_part_exts': self._part_exts._to_dict(),
-            }
+            'name':                 self.name,
+            '_class_name':          self.__class__.__name__,
+            '_original_name':       self._original_name,
+            '_tail':                self._tail,
+            '_docked_with_name':    self._docked_with_name,
+            '_part_exts':           self._part_exts._to_dict(),
+        }
 
     @classmethod
     def _from_dict(cls, data):
-        ret = cls(data['name'])
-        ret._original_name = data['_original_name']
-        ret._tail = data['_tail']
-        ret._docked_with_name = data['_docked_with_name']
-        ret._part_exts = PartExts._from_dict(data['_part_exts'])
+        ret                     = cls(data['name'])
+        ret._original_name      = data['_original_name']
+        ret._tail               = data['_tail']
+        ret._docked_with_name   = data['_docked_with_name']
+        ret._part_exts          = PartExts._from_dict(data['_part_exts'])
         return ret
 
 
 class SpacecraftSingleton(Spacecraft):
     _cls_instances = {}
-    _new_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
         if cls not in cls._cls_instances:
-            with cls._new_lock:
-                if cls not in cls._cls_instances:
-                    cls._cls_instances[cls] = super().__new__(cls)
+            cls._cls_instances[cls] = super().__new__(cls)
         return cls._cls_instances[cls]
+
+    def __init__(self, name):
+        if '_initialized' in self.__dict__:
+            return
+        self._initialied = True
+        super().__init__(name)
 
 
 class SpaceStation(SpacecraftSingleton):
     _crew_mission_count = 0
     _supply_mission_count = 0
-    _last_mission_end_time: u.Quantity = 0 * u.s
+    _last_mission_end_time = 0
 
     def supply_mission(self, tasks: Tasks):
         raise NotImplementedError()
@@ -145,33 +143,34 @@ class SpaceStation(SpacecraftSingleton):
 
     def _to_dict(self):
         dic = {
-            '_crew_mission_count': self._crew_mission_count,
-            '_supply_mission_count': self._supply_mission_count,
-            '_last_mission_end_time': self._last_mission_end_time.to_value(u.s),
-            }
+            '_crew_mission_count':      self._crew_mission_count,
+            '_supply_mission_count':    self._supply_mission_count,
+            '_last_mission_end_time':   self._last_mission_end_time,
+        }
         return super()._to_dict() | dic
 
     @classmethod
     def _from_dict(cls, data):
-        ret = Spacecraft.get(data['name'])  # 如果已经有初始化的单例则覆盖其属性
+        ret = Spacecraft.get(data['name'])
         if not ret:
             ret = cls(data['name'])
-        ret._original_name = data['_original_name']
-        ret._tail = data['_tail']
-        ret._crew_mission_count = data['_crew_mission_count']
-        ret._supply_mission_count = data['_supply_mission_count']
-        ret._last_mission_end_time = data['_last_mission_end_time'] * u.s
-        ret._docked_with_name = data['_docked_with_name']
-        ret._part_exts = PartExts._from_dict(data['_part_exts'])
+        # 如果已经有初始化的单例则覆盖其属性
+        ret._original_name          = data['_original_name']
+        ret._tail                   = data['_tail']
+        ret._crew_mission_count     = data['_crew_mission_count']
+        ret._supply_mission_count   = data['_supply_mission_count']
+        ret._last_mission_end_time  = data['_last_mission_end_time']
+        ret._docked_with_name       = data['_docked_with_name']
+        ret._part_exts              = PartExts._from_dict(data['_part_exts'])
         return ret
         
 
 class KerbalSpaceStation(SpaceStation):
-    _deorbit_alt = 50000 * u.m
-    _launch_lead_time = 360 * u.s
-    _min_phase_diff = 10 * u.deg
-    _max_phase_diff = 30 * u.deg
-    _time_between_missions = 90 * u.d
+    _deorbit_alt = 50000
+    _launch_lead_time = 360
+    _min_phase_diff = np.deg2rad(10)
+    _max_phase_diff = np.deg2rad(30)
+    _time_between_missions = 7776000  # ~90days
 
     def __init__(self, *args, **kwargs):
         super().__init__('KSS')
@@ -203,11 +202,11 @@ class KerbalSpaceStation(SpaceStation):
         launch_direction = 'SE'
         launch_window = orb.launch_window(
             site_p, 
-            direction=launch_direction, 
-            min_phase=self._min_phase_diff, 
-            max_phase=self._max_phase_diff,
-            start_time=start_time,
-            end_time=end_time
+            direction   = launch_direction, 
+            min_phase   = self._min_phase_diff, 
+            max_phase   = self._max_phase_diff,
+            start_time  = start_time,
+            end_time    = end_time
             )
         spacecraft = Spacecraft(f'{self.name} {mission_type} mission {counter}')
         from .task.launch import Soyuz2Launch
@@ -216,14 +215,14 @@ class KerbalSpaceStation(SpaceStation):
         from .task.resource_transfer import ResourceTransfer
         insert_orbit = Orbit.from_coe(
             orb.attractor,
-            orb.attractor.r + 240 * u.km,
-            0.001 * u.one,
+            orb.attractor.r + 240000,
+            0.001,
             orb.inc,
             orb.raan,
             orb.argp,
             orb.nu,
             orb.epoch
-            )
+        )
         launch_task = Soyuz2Launch(
             spacecraft=spacecraft,
             tasks=tasks,
@@ -231,13 +230,13 @@ class KerbalSpaceStation(SpaceStation):
             # payload_name='_Soyuz_Spacecraft',
             start_time=launch_window - self._launch_lead_time,
             direction=launch_direction
-            )
+        )
         rdv_task = Rendezvous(spacecraft, self, tasks)
         dock_task = Docking(
             spacecraft, 
             self, 
             tasks
-            )
+        )
         task_list = [launch_task, rdv_task, dock_task] 
         if mission_type == 'supply':
             resource_task = ResourceTransfer(
@@ -268,4 +267,4 @@ KSS = KerbalSpaceStation()
 
 SPACESTATION_DIC: dict[str, SpaceStation] = {
     "kss": KSS
-    }
+}

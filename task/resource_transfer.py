@@ -1,5 +1,4 @@
 from __future__ import annotations
-from astropy import units as u
 from time import sleep
 from krpc.services.spacecenter import ResourceTransfer as RT
 
@@ -18,8 +17,7 @@ def _transfer_resource(out_parts: list[Part],
                        in_parts: list[Part],
                        resource: str,
                        amount: float,
-                       rt: RT,
-                       ):
+                       rt: RT):
     A = [a.resources.amount(resource) for a in out_parts]
     B = [b.resources.amount(resource) for b in in_parts]
     cap = [b.resources.max(resource) for b in in_parts]
@@ -39,8 +37,8 @@ class ResourceTransfer(Task):
                  tasks: Tasks, 
                  resources: dict[str, float] | None = None,
                  trans_all: bool = False,
-                 start_time: u.Quantity = -1 * u.s, 
-                 duration: u.Quantity = 600 * u.s, 
+                 start_time: float = -1, 
+                 duration: float = 600, 
                  importance: int = 3, 
                  submit_next: bool = True):
         super().__init__(from_spacecraft, tasks, start_time, duration, importance, submit_next)
@@ -53,7 +51,7 @@ class ResourceTransfer(Task):
 
     @property
     def description(self):
-        return (f'{self.from_spacecraft} -> 资源转移 -> {self.spacecraft}'
+        return (f'{self.from_spacecraft.name} -> 资源转移 -> {self.spacecraft.name}'
                 f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
@@ -84,10 +82,10 @@ class ResourceTransfer(Task):
     def _to_dict(self):
         dic = {
             'from_spacecraft_name': self.from_spacecraft.name,
-            'to_spacecraft_name': self.to_spacecraft.name,
-            'resources': self.resources,
-            'trans_all': self.trans_all,
-            }
+            'to_spacecraft_name':   self.to_spacecraft.name,
+            'resources':            self.resources,
+            'trans_all':            self.trans_all,
+        }
         return super()._to_dict() | dic
 
     @classmethod
@@ -97,12 +95,12 @@ class ResourceTransfer(Task):
         _to = Spacecraft.get(data['to_spacecraft_name'])
         return cls(
             from_spacecraft = _from,
-            to_spacecraft = _to,
-            tasks = tasks,
-            resources = data['resources'],
-            trans_all = data['trans_all'],
-            start_time = data['start_time'] * u.s,
-            duration = data['duration'] * u.s,
-            importance = data['importance'],
-            submit_next = data['submit_next'],
-            )
+            to_spacecraft   = _to,
+            tasks           = tasks,
+            resources       = data['resources'],
+            trans_all       = data['trans_all'],
+            start_time      = data['start_time'],
+            duration        = data['duration'],
+            importance      = data['importance'],
+            submit_next     = data['submit_next'],
+        )

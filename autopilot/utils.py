@@ -1,6 +1,4 @@
 import numpy as np
-import krpc
-from ..utils import UTIL_CONN
 
 
 class PIDController:

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from astropy import units as u
 from typing import TYPE_CHECKING
 
 from .tasks import Task
@@ -18,8 +17,8 @@ class Transfer(Task):
                  spacecraft: Spacecraft, 
                  tasks: Tasks, 
                  orb_t: Orbit,
-                 start_time: u.Quantity = -1 * u.s, 
-                 duration: u.Quantity = 300 * u.s, 
+                 start_time: float = -1, 
+                 duration: float = 300, 
                  importance: int = 6,
                  submit_next: bool = True,
                  ):
@@ -64,7 +63,7 @@ class Transfer(Task):
     def _to_dict(self):
         dic =  {
             'orb_t': self.orb_t._to_dict()
-            }
+        }
         return super()._to_dict() | dic
     
     @classmethod
@@ -72,14 +71,14 @@ class Transfer(Task):
         from ..spacecrafts import Spacecraft
         from ..astro.orbit import Orbit
         return cls(
-            spacecraft = Spacecraft.get(data['spacecraft_name']),
-            tasks = tasks,
-            orb_t = Orbit._from_dict(data['orb_t']),
-            start_time = data['start_time'] * u.s,
-            duration = data['duration'] * u.s,
-            importance = data['importance'],
+            spacecraft  = Spacecraft.get(data['spacecraft_name']),
+            tasks       = tasks,
+            orb_t       = Orbit._from_dict(data['orb_t']),
+            start_time  = data['start_time'],
+            duration    = data['duration'],
+            importance  = data['importance'],
             submit_next = data['submit_next'],
-            )
+        )
 
 
 class CourseCorrect(Task):
@@ -87,8 +86,8 @@ class CourseCorrect(Task):
                  spacecraft: Spacecraft, 
                  tasks: Tasks, 
                  orb_t: Orbit,
-                 start_time: u.Quantity = -1 * u.s, 
-                 duration: u.Quantity = 300 * u.s, 
+                 start_time: float = -1, 
+                 duration: float = 300, 
                  importance: int = 6,
                  submit_next: bool = True,
                  ):
@@ -128,7 +127,7 @@ class CourseCorrect(Task):
     def _to_dict(self):
         dic =  {
             'orb_t': self.orb_t._to_dict()
-            }
+        }
         return super()._to_dict() | dic
     
     @classmethod
@@ -136,11 +135,11 @@ class CourseCorrect(Task):
         from ..spacecrafts import Spacecraft
         from ..astro.orbit import Orbit
         return cls(
-            spacecraft = Spacecraft.get(data['spacecraft_name']),
-            tasks = tasks,
-            orb_t = Orbit._from_dict(data['orb_t']),
-            start_time = data['start_time'] * u.s,
-            duration = data['duration'] * u.s,
-            importance = data['importance'],
+            spacecraft  = Spacecraft.get(data['spacecraft_name']),
+            tasks       = tasks,
+            orb_t       = Orbit._from_dict(data['orb_t']),
+            start_time  = data['start_time'],
+            duration    = data['duration'],
+            importance  = data['importance'],
             submit_next = data['submit_next'],
-            )
+        )

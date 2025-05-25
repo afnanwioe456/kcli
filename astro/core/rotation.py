@@ -12,14 +12,14 @@ def ENU_rotation(r):
 
     z_axis = np.array([0, 0, 1])
     north = z_axis - np.dot(z_axis, up) * up  # 去除 up 分量
-    norm_north = np.linalg.norm(north)
+    norm_north = npl.norm(north)
     if norm_north < 1e-8:  # 若在极区附近
         north = np.array([0, 1, 0])
-        norm_north = np.linalg.norm(north)
+        norm_north = npl.norm(north)
     north = north / norm_north
 
     east = np.cross(north, up)
-    east = east / np.linalg.norm(east)
+    east = east / npl.norm(east)
     
     return np.vstack((north, east, up))
 

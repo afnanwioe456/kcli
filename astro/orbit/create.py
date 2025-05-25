@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
-from astropy import units as u
 
 from .scalar import OrbitBase
 from .utils import orbit_launch_window
@@ -15,82 +14,73 @@ if TYPE_CHECKING:
 
 
 class Orbit(OrbitBase):
-    @u.quantity_input(t=u.s)
-    def propagate(self, t, tol=1e-8, max_iter=100):
+    def propagate(self, t):
         """传播时间t后的轨道
 
         Args:
-            t (Quantity): 传播时间.
-            tol (float, optional): 误差. Defaults to 1e-8.
-            max_iter (int, optional): 最大迭代数. Defaults to 100.
+            t (float): 传播时间.
 
         Returns:
             Orbit: 传播后的轨道
         """
-        dt = t.to_value(u.s)
-        r_vec = self.r_vec.to_value(u.km)
-        v_vec = self.v_vec.to_value(u.km / u.s)
-        k = self.attractor.mu.to_value(u.km ** 3 / u.s ** 2)
-        r1_vec, v1_vec = rv2rv_delta_t(r_vec, v_vec, dt, k, tol, max_iter)
+        if self.e < 1e-10:
+            nu = self.nu + t / self.period * (2 * np.pi)
+            return self.propagate_to_nu(nu)
+        if self.e < 1:
+            dt = t % self.period
+        else:
+            dt = t
+        r_vec = self.r_vec
+        v_vec = self.v_vec
+        k = self.attractor.mu
+        r1_vec, v1_vec = rv2rv_delta_t(r_vec, v_vec, dt, k)
         return self.from_rv(
             self.attractor,
-            r1_vec * u.km,
-            v1_vec * u.km / u.s,
+            r1_vec,
+            v1_vec,
             self.epoch + t
         )
 
-    @u.quantity_input(epoch=u.s)
-    def propagate_to_epoch(self, epoch, tol=1e-8, max_iter=100):
+    def propagate_to_epoch(self, epoch):
         """传播到指定时间的轨道
 
         Args:
-            epoch (Quantity): 时刻.
-            tol (float, optional): 误差. Defaults to 1e-8.
-            max_iter (int, optional): 最大迭代数. Defaults to 100.
+            epoch (float): 时刻.
 
         Returns:
             Orbit: 传播后的轨道
         """
         dt = epoch - self.epoch
-        return self.propagate(dt, tol, max_iter)
+        return self.propagate(dt)
 
-    @u.quantity_input(nu=u.rad)
-    def propagate_to_nu(self, nu, prograde=False, M=0):
+    def propagate_to_nu(self, nu, prograde=True, M=0):
         """传播到指定真近点角的轨道
 
         Args:
-            nu (Quantity): 真近点角
+            nu (float): 真近点角
             prograde (bool): 严格按正向传播
             M (int): 传播经过的完整周期
 
         Returns:
             Orbit: 传播后的轨道
         """
-        if M != 0:
-            prograde = True
         orb = Orbit.from_coe(self.attractor, self.a, self.e, self.inc, 
                              self.raan, self.argp, nu, self.epoch)
         dt = orb.delta_t - self.delta_t
-        if (dt < 0 or M != 0) and np.isinf(self.period.to_value(u.s)):
-            raise ValueError()
         if prograde and dt < 0:
-            dt += self.period
-        dt += M * self.period
+            M += 1
+        if M != 0:
+            if self.e > 1:
+                raise ValueError()
+            else:
+                dt += M * self.period
         orb._epoch = dt + orb._epoch
         return orb
 
-    @u.quantity_input(r=u.km)
     def propagate_to_r(self, r, sign=True, prograde=True, M=0):
-        nu = r2nu(
-            r.to_value(u.km),
-            self.h.to_value(u.km ** 2 / u.s),
-            self.e.to_value(u.one),
-            self.attractor.mu.to_value(u.km ** 3 / u.s ** 2),
-            sign
-        ) * u.rad
+        nu = r2nu(r, self.h, self.e, self.attractor.mu, sign)
         return self.propagate_to_nu(nu, prograde, M)
 
-    @u.quantity_input(epoch=u.s)
     def is_safe_before(self, epoch):
         if epoch < self.epoch:
             raise ValueError(f'epoch {epoch} is smaller than orbit epoch {self.epoch}')
@@ -101,56 +91,42 @@ class Orbit(OrbitBase):
         if orb.nu < self.nu:
             # 如果经过了近星点
             return self.is_safe()
-        if 2*np.pi*u.rad - orb.nu < self.nu:
+        if 2 * np.pi - orb.nu < self.nu:
             # 如果epoch处更接近近星点
             return orb.is_safe()
         return self.is_safe(self.nu)
         
-
     @staticmethod
-    @u.quantity_input(
-        a=u.km,
-        ecc=u.one,
-        inc=u.rad,
-        raan=u.rad,
-        argp=u.rad,
-        nu=u.rad,
-        epoch=u.s,
-    )
     def from_coe(attractor, a, e, inc, raan, argp, nu, epoch):
         """从轨道根数创建Orbit对象
 
         Args:
             attractor (Body): 中心天体.
-            a (Quantity): 半长轴.
-            e (Quantity): 离心率.
-            inc (Quantity): 轨道倾角.
-            raan (Quantity): 升交点经度.
-            argp (Quantity): 近地点辐角.
-            nu (Quantity): 真近点角.
-            epoch (Quantity): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
+            a (float): 半长轴.
+            e (float): 离心率.
+            inc (float): 轨道倾角.
+            raan (float): 升交点经度.
+            argp (float): 近地点辐角.
+            nu (float): 真近点角.
+            epoch (float): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
 
         Returns:
             Orbit: 轨道.
         """
+        # FIXME: 没有判断双曲线nu是否合法
         orb = Orbit()
         orb._assign_coe(attractor, a, e, inc, raan, argp, nu, epoch)
         return orb
 
     @staticmethod
-    @u.quantity_input(
-        r_vec=u.km,
-        v_vec=u.km/u.s,
-        epoch=u.s,
-    )
     def from_rv(attractor, r_vec, v_vec, epoch):
         """从rv状态向量创建Orbit对象
 
         Args:
             attractor (Body): 中心天体.
-            r_vec (ndarray[Quantity]): 位置矢量.
-            v_vec (ndarray[Quantity]): 速度矢量.
-            epoch (Quantity): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
+            r_vec (ndarray): 位置矢量.
+            v_vec (ndarray): 速度矢量.
+            epoch (float): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
 
         Returns:
             Orbit: 轨道.
@@ -165,9 +141,9 @@ class Orbit(OrbitBase):
 
         Args:
             attractor (Body): 中心天体
-            r_vec (Quantity): 位置矢量
-            h_i (Quantity): 角动量方向
-            epoch (Quantity): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
+            r_vec (ndarray): 位置矢量
+            h_i (ndarray): 角动量方向
+            epoch (float): KSPRO历元时刻, 自1951-01-01 00:00:00以来的秒数.
 
         Returns:
             Orbit: 圆轨道
@@ -190,24 +166,24 @@ class Orbit(OrbitBase):
 
 
     @classmethod
-    def from_krpcorb(cls, orbit: KRPCOrbit, epoch: u.Quantity | None = None):
+    def from_krpcorb(cls, orbit: KRPCOrbit, epoch: float | None = None):
         """从krpc Orbit对象创建Orbit对象
 
         Args:
             orbit (Orbit): krpc Orbit
-            ut (Quantity | None): epoch
+            ut (float | None): epoch
         """
         epoch = get_ut() if epoch is None else epoch
-        nu = orbit.true_anomaly_at_ut(epoch.to_value(u.s))
+        nu = orbit.true_anomaly_at_ut(epoch)
         nu = nu % (2 * np.pi)
         return cls.from_coe(
-            BODY_DIC[orbit.body.name],
-            orbit.semi_major_axis * u.m,
-            orbit.eccentricity * u.one,
-            orbit.inclination * u.rad,
-            orbit.longitude_of_ascending_node * u.rad,
-            orbit.argument_of_periapsis * u.rad,
-            nu * u.rad,
+            Body.get_or_create(orbit.body.name),
+            orbit.semi_major_axis,
+            orbit.eccentricity,
+            orbit.inclination,
+            orbit.longitude_of_ascending_node,
+            orbit.argument_of_periapsis,
+            nu,
             epoch,
         )
 
@@ -216,10 +192,10 @@ class Orbit(OrbitBase):
                       direction: str = 'SE', 
                       cloest: bool = False, 
                       search: bool = True,
-                      min_phase: u.Quantity = 10 * u.deg, 
-                      max_phase: u.Quantity = 30 * u.deg,
-                      start_time: u.Quantity = None, 
-                      end_time: u.Quantity = None) -> u.Quantity:
+                      min_phase: float = None, 
+                      max_phase: float = None,
+                      start_time: float = None, 
+                      end_time: float = None) -> list[float] | float:
         """发射场向轨道发射的时刻
 
         Args:
@@ -227,14 +203,18 @@ class Orbit(OrbitBase):
             direction (str): 发射方向. Defaults to 'SE'.
             cloest (bool): 返回最近的窗口. Defaults to False.
             search (bool): 搜索最佳窗口. Defaults to True.
-            min_phase (int, optional): 最小相位差. Defaults to 10.
-            max_phase (int, optional): 最大相位差. Defaults to 30.
-            start_time (Quantity, optional): 搜索开始时间. Defaults to None.
-            end_time (Quantity, optional): 搜索终止时间. Defaults to None.
+            min_phase (float, optional): 最小相位差. Defaults to None.
+            max_phase (float, optional): 最大相位差. Defaults to None.
+            start_time (float, optional): 搜索开始时间. Defaults to None.
+            end_time (float, optional): 搜索终止时间. Defaults to None.
 
         Returns:
-            float: 发射窗口
+            list[float]: 发射窗口
         """
+        if min_phase is None:
+            min_phase = np.deg2rad(10)
+        if max_phase is None:
+            min_phase = np.deg2rad(30)
         if start_time is None or end_time is None:
             start_time = self.epoch
             end_time = self.epoch + self.attractor.rotational_period * 10
@@ -248,41 +228,41 @@ class Orbit(OrbitBase):
         if ut is None:
             ut = get_ut()
         orb = self.propagate_to_epoch(ut)
-        nu = orb.nu.to_value(u.rad)
-        e = orb.e.to_value(u.one)
+        nu = orb.nu
+        e = orb.e
         E = nu2E(nu, e)
         Me = E2Me(E, e)
-        return (f'SMA: {orb.a.to_value(u.m)}\n'
-                f'ECC: {orb.e.to_value(u.one)}\n'
-                f'INC: {orb.inc.to_value(u.deg)}\n'
+        return (f'SMA: {orb.a}\n'
+                f'ECC: {orb.e}\n'
+                f'INC: {np.rad2deg(orb.inc)}\n'
                 f'MNA: {Me}\n'
-                f'LAN: {orb.raan.to_value(u.deg)}\n'
-                f'ARG: {orb.argp.to_value(u.deg)}')
+                f'LAN: {np.rad2deg(orb.raan)}\n'
+                f'ARG: {np.rad2deg(orb.argp)}')
 
     def _to_dict(self):
         return {
-            'attractor': self.attractor.name,
-            'a': self.a.to_value(u.km),
-            'e': self.e.to_value(u.one),
-            'inc': self.inc.to_value(u.rad),
-            'raan': self.raan.to_value(u.rad),
-            'argp': self.argp.to_value(u.rad),
-            'nu': self.nu.to_value(u.rad),
-            'epoch': self.epoch.to_value(u.s),
+            'attractor':    self.attractor.name,
+            'a':            self.a,
+            'e':            self.e,
+            'inc':          self.inc,
+            'raan':         self.raan,
+            'argp':         self.argp,
+            'nu':           self.nu,
+            'epoch':        self.epoch,
         }
 
     @classmethod
     def _from_dict(cls, data):
-        from ..body import BODY_DIC
+        from ..body import Body
         return cls.from_coe(
-            attractor = BODY_DIC[data['attractor']],
-            a = data['a'] * u.km,
-            e = data['e'] * u.one,
-            inc = data['inc'] * u.rad,
-            raan = data['raan'] * u.rad,
-            argp = data['argp'] * u.rad,
-            nu = data['nu'] * u.rad,
-            epoch = data['epoch'] * u.s,
+            attractor   = Body.get_or_create(data['attractor']),
+            a           = data['a'],
+            e           = data['e'],
+            inc         = data['inc'],
+            raan        = data['raan'],
+            argp        = data['argp'],
+            nu          = data['nu'],
+            epoch       = data['epoch'],
         )
         
         

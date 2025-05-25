@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy.optimize import dual_annealing, root_scalar, minimize, NonlinearConstraint
 from numba import njit
-from astropy import units as u
 
 from ..core.kepler import *
 from ..core.lagrange import *
@@ -216,24 +215,24 @@ def transfer_target(orbit: Orbit, moon: Body, cap_t, pe_m, inc, relative=True):
     Args:
         orbit (Orbit): 航天器轨道
         moon (Body): 卫星
-        cap_t (Quantity): 捕获瞄准时刻
-        pe_m (Quantity): 停泊轨道瞄准近星点
-        inc (Quantity): 轨道倾角
+        cap_t (float): 捕获瞄准时刻
+        pe_m (float): 停泊轨道瞄准近星点
+        inc (float): 轨道倾角
         relative (bool): 使用相对倾角
 
     Returns:
         Orbit: 转移瞄准轨道
     """
-    orb_m = moon.orbit.propagate_to_epoch(cap_t)
+    orb_m = moon.orbit(cap_t)
     rm_vec = orb_m.r_vec
-    rp_e = orbit.r_at_nu(orbit.nu_at_direction(-rm_vec)).to_value(u.km)
-    rm_vec = orb_m.r_vec.to_value(u.km)
-    vm_vec = orb_m.v_vec.to_value(u.km / u.s)
-    rp_m = (pe_m + moon.r).to_value(u.km)
-    GM_e = moon.attractor.k.to_value(u.km ** 3 / u.s ** 2)
-    GM_m = moon.mu.to_value(u.km ** 3 / u.s ** 2)
-    soi = moon.soi.to_value(u.km)
-    inc = inc.to_value(u.rad)
+    rp_e = orbit.ra
+    rm_vec = orb_m.r_vec
+    vm_vec = orb_m.v_vec
+    rp_m = (pe_m + moon.r)
+    GM_e = moon.attractor.mu
+    GM_m = moon.mu
+    soi = moon.soi
+    inc = inc
     if relative:
         ref = OrbitalFrame.from_orbit(orb_m)
         rm_vec = ref.transform_d_from_parent(rm_vec)
@@ -245,7 +244,7 @@ def transfer_target(orbit: Orbit, moon: Body, cap_t, pe_m, inc, relative=True):
     if relative:
         re_vec = ref.transform_d_to_parent(re_vec)
         ve_vec = ref.transform_d_to_parent(ve_vec)
-    orb_t = Orbit.from_rv(moon.attractor, re_vec * u.km, ve_vec * u.km / u.s, cap_t)
+    orb_t = Orbit.from_rv(moon.attractor, re_vec, ve_vec, cap_t)
     return orb_t
 
 ###
@@ -318,8 +317,8 @@ def _find_e_orbit_root(rp_e, period, *args):
 
 def transfer_orbit_target(orb_v: Orbit, 
                           orb_t: Orbit, 
-                          cap_t: u.Quantity, 
-                          rp_t: u.Quantity | None = None,
+                          cap_t: float, 
+                          rp_t: float | None = None,
                           timed=False):
     """向卫星目标轨道转移的瞄准轨道, 位于捕获临界前
 
@@ -333,57 +332,58 @@ def transfer_orbit_target(orb_v: Orbit,
     Returns:
         Orbit: 瞄准轨道
     """
-    moon = orb_t.attractor
+    moon    = orb_t.attractor
     if moon.attractor is not orb_v.attractor:
         raise ValueError(f'Transfer must be inside the same planet system, '
                          f'got {moon.attractor.name} and {orb_v.attractor.name}.')
-    orb_m = moon.orbit.propagate_to_epoch(cap_t)
-    period = orb_m.period.to_value(u.s)
-    rm_vec = orb_m.r_vec.to_value(u.km)
-    vm_vec = orb_m.v_vec.to_value(u.km / u.s)
-    rp_e = orb_v.ra.to_value(u.km)
-    rp_m = rp_t if rp_t else orb_t.ra.to_value(u.km)
-    GM_e = moon.attractor.mu.to_value(u.km ** 3 / u.s ** 2)
-    GM_m = moon.mu.to_value(u.km ** 3 / u.s ** 2)
-    soi = moon.soi.to_value(u.km)
-    raan = orb_t.raan.to_value(u.rad)
-    inc = orb_t.inc.to_value(u.rad)
+    orb_m   = moon.orbit(cap_t)
+    period  = orb_m.period
+    rm_vec  = orb_m.r_vec
+    vm_vec  = orb_m.v_vec
+    rp_e    = orb_v.ra
+    rp_m    = rp_t if rp_t else orb_t.ra
+    GM_e    = moon.attractor.mu
+    GM_m    = moon.mu
+    soi     = moon.soi
+    raan    = orb_t.raan
+    inc     = orb_t.inc
 
-    args = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
-    e, delta_t, argp = _find_e_orbit_root(rp_e, *args)
-    rcap_vec, vcap_vec = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
-    orb_m = orb_m.propagate(delta_t * u.s)
-    re_vec = orb_m.r_vec + rcap_vec * u.km
-    ve_vec = orb_m.v_vec + vcap_vec * u.km / u.s
-    orb_t = Orbit.from_rv(moon.attractor, re_vec, ve_vec, orb_m.epoch)
+    args    = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
+    e, delta_t, argp    = _find_e_orbit_root(rp_e, *args)
+    rcap_vec, vcap_vec  = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
+    orb_m   = orb_m.propagate(delta_t)
+    re_vec  = orb_m.r_vec + rcap_vec
+    ve_vec  = orb_m.v_vec + vcap_vec
+    orb_t   = Orbit.from_rv(moon.attractor, re_vec, ve_vec, orb_m.epoch)
     return orb_t
 
-def return_target(orb_v: Orbit, pe_e: u.Quantity, esc_t: u.Quantity):
+def return_target(orb_v: Orbit, pe_e: float, esc_t: float):
     """从卫星返回行星指定近星点高度的瞄准轨道, 位于逃逸临界前
 
     Args:
         orb_v (Orbit): 航天器轨道
-        pe_e (Quantity): 近星点高度
-        esc_t (Quantity): 瞄准逃逸时间
+        pe_e (float): 近星点高度
+        esc_t (float): 瞄准逃逸时间
 
     Returns:
         Orbit: 瞄准轨道
     """
-    moon = orb_v.attractor
-    orb_m = moon.orbit.propagate_to_epoch(esc_t)
-    period = orb_m.period.to_value(u.s)
-    rm_vec = orb_m.r_vec.to_value(u.km)
-    vm_vec = orb_m.v_vec.to_value(u.km / u.s)
-    rp_e = (pe_e + moon.r).to_value(u.km)
-    rp_m = orb_v.ra.to_value(u.km)
-    GM_e = moon.attractor.k.to_value(u.km ** 3 / u.s ** 2)
-    GM_m = moon.mu.to_value(u.km ** 3 / u.s ** 2)
-    soi = moon.soi.to_value(u.km)
-    raan = orb_v.raan.to_value(u.rad)
-    inc = orb_v.inc.to_value(u.rad)
-    inc = np.pi - inc  # 逆向求解
-    args = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
-    e, delta_t, argp = _find_e_orbit_root(rp_e, *args)
-    resc_vec, vesc_vec = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
-    orb_t = Orbit.from_rv(moon, resc_vec, -vesc_vec, orb_v.epoch + delta_t)
+    moon    = orb_v.attractor
+    earth   = moon.attractor
+    orb_m   = moon.orbit(esc_t)
+    period  = orb_m.period
+    rm_vec  = orb_m.r_vec
+    vm_vec  = orb_m.v_vec
+    rp_e    = (pe_e + earth.r)
+    rp_m    = orb_v.ra
+    GM_e    = earth.mu
+    GM_m    = moon.mu
+    soi     = moon.soi
+    raan    = orb_v.raan
+    inc     = orb_v.inc
+    inc     = np.pi - inc  # 逆向求解
+    args    = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
+    e, delta_t, argp    = _find_e_orbit_root(rp_e, *args)
+    resc_vec, vesc_vec  = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
+    orb_t   = Orbit.from_rv(moon, resc_vec, -vesc_vec, orb_v.epoch + delta_t)
     return orb_t

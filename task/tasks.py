@@ -1,7 +1,6 @@
 from __future__ import annotations
 import krpc
 import threading
-from astropy import units as u
 from typing import TYPE_CHECKING
 
 from ..utils import *
@@ -37,13 +36,11 @@ class Task:
     def __init__(self,
                  spacecraft: Spacecraft,
                  tasks: Tasks,
-                 start_time: u.Quantity,
-                 duration: u.Quantity,
+                 start_time: float,
+                 duration: float,
                  importance: int,
-                 submit_next: bool = True,
-                 ):
+                 submit_next: bool = True):
         self.spacecraft = spacecraft
-        self.name = self.spacecraft.name
         self.tasks = tasks
         self.importance = importance
         self.start_time = start_time
@@ -58,7 +55,7 @@ class Task:
     def short_description(self) -> str:
         return self.description.split('\n')[0]
 
-    def reschedule(self, after_t: u.Quantity):
+    def reschedule(self, after_t: float):
         self.start_time = after_t
 
     def __str__(self):
@@ -68,7 +65,7 @@ class Task:
         self.vessel = self.spacecraft.vessel
         if not switch_to_vessel(self.vessel):
             return False
-        self.conn = krpc.connect(self.name)
+        self.conn = krpc.connect(self.spacecraft.name)
         self.sc = self.conn.space_center
         if self.sc is None:
             return False
@@ -84,13 +81,13 @@ class Task:
 
     def _to_dict(self):
         return {
-            '_class_name': self.__class__.__name__,
-            'spacecraft_name': self.spacecraft.name,
-            'start_time': self.start_time.to_value(u.s),
-            'duration': self.duration.to_value(u.s),
-            'importance': self.importance,
-            'submit_next': self.submit_next,
-            }
+            '_class_name':      self.__class__.__name__,
+            'spacecraft_name':  self.spacecraft.name,
+            'start_time':       self.start_time,
+            'duration':         self.duration,
+            'importance':       self.importance,
+            'submit_next':      self.submit_next,
+        }
 
     @classmethod
     def _from_dict(cls, data, tasks):
@@ -99,11 +96,11 @@ class Task:
         return cls(
             s, 
             tasks, 
-            data['start_time'] * u.s, 
-            data['duration'] * u.s, 
+            data['start_time'], 
+            data['duration'], 
             data['importance'],
             data['submit_next'],
-            )
+        )
 
 
 class Tasks:
@@ -251,7 +248,7 @@ class TaskQueue:
             raise ValueError()
         ut = get_ut()
         if tasks.next_task.start_time < ut:
-            tasks.next_task.start_time = ut + 60 * u.s
+            tasks.next_task.start_time = ut + 60
         with cls._queue_condition:
             cls._put_helper(tasks)
             cls._size += 1

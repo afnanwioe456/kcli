@@ -1,8 +1,5 @@
 import numpy as np
 import numpy.linalg as npl
-from astropy import units as u
-import threading
-import time
 
 from ..astro.orbit import Orbit
 from ..astro.frame import BCIFrame
@@ -101,19 +98,19 @@ class ReentrySimulation:
             return
 
         if not self._has_atmosphere or \
-            npl.norm(self.orbit.r_vec.to_value(u.m)) - self._body_r < self._atmosphere_height:
+            npl.norm(self.orbit.r_vec) - self._body_r < self._atmosphere_height:
             # 已经进入大气或在无大气天体着陆
             reenter_orbit       = self.orbit
         else:
             # 传播到进入大气节省计算
             # FIXME: 在大气稀薄的情况下可能会出错
-            reenter_r           = (self._body_r + self._atmosphere_height) * u.m
+            reenter_r           = self._body_r + self._atmosphere_height
             reenter_orbit       = self.orbit.propagate_to_r(reenter_r, sign=False)
 
         bci_ref             = BCIFrame(reenter_orbit.attractor, reenter_orbit.epoch)
-        self._t             = reenter_orbit.epoch.to_value(u.s)
-        self._x             = reenter_orbit.r_vec.to_value(u.m)
-        self._v             = reenter_orbit.v_vec.to_value(u.m / u.s)
+        self._t             = reenter_orbit.epoch
+        self._x             = reenter_orbit.r_vec
+        self._v             = reenter_orbit.v_vec
         self._x             = bci_ref.transform_d_to_left_hand(self._x)
         self._v             = bci_ref.transform_d_to_left_hand(self._v)
         # 先转换速度

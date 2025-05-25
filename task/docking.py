@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from time import sleep
-from astropy import units as u
 
 from .tasks import Task
 from ..autopilot import get_closer
@@ -40,8 +39,8 @@ class Docking(Task):
                  spacecraft: Spacecraft, 
                  spacestation: SpaceStation,
                  tasks: Tasks, 
-                 start_time: u.Quantity = -1 * u.s, 
-                 duration: u.Quantity = 1800 * u.s, 
+                 start_time: float = -1, 
+                 duration: float = 1800,
                  importance: int = 3,
                  submit_next: bool = True):
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
@@ -49,7 +48,7 @@ class Docking(Task):
 
     @property
     def description(self):
-        return (f'{self.name} -> 对接 -> {self.spacestation.name}\n'
+        return (f'{self.spacecraft.name} -> 对接 -> {self.spacestation.name}\n'
                 f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
@@ -68,11 +67,11 @@ class Docking(Task):
         dis = 50
         self.spacecraft.part_exts.rcs = True
         self.spacecraft.part_exts.main_engines = True
-        LOGGER.debug(f'{self.name} -> {self.spacestation.name} getting closer: {dis}')
+        LOGGER.debug(f'{self.spacecraft.name} -> {self.spacestation.name} getting closer: {dis}')
         get_closer(dis, self.vessel, self.spacestation.vessel)
-        LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking')
+        LOGGER.debug(f'{self.spacecraft.name} -> {self.spacestation.name} docking')
         _dock_with_target(self.conn, self.spacestation, target_dpext)
-        LOGGER.debug(f'{self.name} -> {self.spacestation.name} docking completed')
+        LOGGER.debug(f'{self.spacecraft.name} -> {self.spacestation.name} docking completed')
         self.conn.close()
     
     def _to_dict(self):
@@ -86,22 +85,22 @@ class Docking(Task):
         from ..spacecrafts import Spacecraft
         ss: SpaceStation = Spacecraft.get(data['spacestation_name'])
         return cls(
-            spacecraft = Spacecraft.get(data['spacecraft_name']),
-            spacestation = ss,
-            tasks = tasks,
-            start_time = data['start_time'] * u.s,
-            duration = data['duration'] * u.s,
-            importance = data['importance'],
-            submit_next = data['submit_next'],
-            )
+            spacecraft      = Spacecraft.get(data['spacecraft_name']),
+            spacestation    = ss,
+            tasks           = tasks,
+            start_time      = data['start_time'],
+            duration        = data['duration'],
+            importance      = data['importance'],
+            submit_next     = data['submit_next']
+        )
 
 
 class Undocking(Task):
     def __init__(self, 
                  spacecraft: Spacecraft,
                  tasks: Tasks, 
-                 start_time: u.Quantity = -1 * u.s, 
-                 duration: u.Quantity = 1800 * u.s, 
+                 start_time: float = -1, 
+                 duration: float = 1800,
                  importance: int = 3,
                  submit_next: bool = True):
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)

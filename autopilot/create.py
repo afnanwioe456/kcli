@@ -4,7 +4,9 @@ import numpy as np
 from scipy.optimize import linprog
 from time import sleep
 from krpc.services.spacecenter import SASMode
+
 from .utils import *
+from ..utils import UTIL_CONN
 
 if TYPE_CHECKING:
     from krpc.services.spacecenter import Vessel, Part

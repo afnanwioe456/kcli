@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
 from scipy.optimize import dual_annealing
-from astropy import units as u
 
 from ..core.izzo import izzo
 
@@ -23,7 +22,7 @@ def opt_lambert_by_grid_search(orbit_v: Orbit,
         orbit_v (Orbit): 初始轨道
         orbit_t (Orbit): 目标初始轨道
         safety_ckeck (bool, optional): 安全检测. Defaults to True.
-        before (Quantity, optional): 限制在该时刻之前转移. Defaults to None.
+        before (float, optional): 限制在该时刻之前转移. Defaults to None.
         iteration (int, optional): 迭代次数. Defaults to 2.
         resolution (int, optional): 网格分辨率. Defaults to 25.
 
@@ -31,15 +30,15 @@ def opt_lambert_by_grid_search(orbit_v: Orbit,
         Maneuver: 相对于初始轨道的机动
     """
     from .create import Maneuver
-    best_dv = np.inf * u.km / u.s
+    best_dv = np.inf
     best_lam = None
-    epoch = orbit_v.epoch.to_value(u.s)
-    pv = orbit_v.period.to_value(u.s)
-    pt = orbit_t.period.to_value(u.s)
+    epoch = orbit_v.epoch
+    pv = orbit_v.period
+    pt = orbit_t.period
     if before is None:
         before = 10 * pv + epoch
     else:
-        before = before.to_value(u.s)
+        before = before
     trans_l = 0.25 * min(pv,pt)
     trans_r = 0.75 * max(pv,pt)
     wait_l = 60
@@ -49,10 +48,10 @@ def opt_lambert_by_grid_search(orbit_v: Orbit,
         trans_step = (trans_r - trans_l) / resolution
         for t1 in np.arange(wait_l, wait_r, wait_step):
             start_epoch = t1 + epoch
-            orbit_S = orbit_v.propagate_to_epoch(start_epoch * u.s)
+            orbit_S = orbit_v.propagate_to_epoch(start_epoch)
             for t2 in np.arange(trans_l, trans_r, trans_step):
                 end_epoch = t2 + start_epoch
-                orbit_R = orbit_t.propagate_to_epoch(end_epoch * u.s)
+                orbit_R = orbit_t.propagate_to_epoch(end_epoch)
                 lambert = Maneuver.lambert(orbit_S, orbit_R, **kwargs)
                 total_dv = lambert.get_total_cost()
                 if total_dv < best_dv:
@@ -74,26 +73,26 @@ def opt_lambert_by_grid_search(orbit_v: Orbit,
 
 def opt_lambert_by_sa(orbit_v: Orbit, 
                       orbit_t: Orbit, 
-                      safety_check=True, 
-                      before=None):
+                      safety_check: bool = True, 
+                      before: bool = None):
     """模拟退火求双脉冲交会lambert问题的最优能量解
 
     Args:
         orbit_v (Orbit): 初始轨道
         orbit_t (Orbit): 目标初始轨道
         safety_ckeck (bool, optional): 安全检测. Defaults to True.
-        before (Quantity, optional): 限制在该时刻之前转移. Defaults to None.
+        before (float, optional): 限制在该时刻之前转移. Defaults to None.
 
     Returns:
         Maneuver: 相对于初始轨道的机动
     """
-    epoch = orbit_v.epoch.to_value(u.s)
-    pv = orbit_v.period.to_value(u.s)
-    pt = orbit_t.period.to_value(u.s)
+    epoch = orbit_v.epoch
+    pv = orbit_v.period
+    pt = orbit_t.period
     if before is None:
         before = (pv * pt) / (abs(pv - pt)) + pv + epoch
     else:
-        before = before.to_value(u.s)
+        before = before
     trans_l = 0.25 * min(pv,pt)
     trans_r = 0.75 * max(pv,pt)
     wait_l = 60
@@ -101,24 +100,24 @@ def opt_lambert_by_sa(orbit_v: Orbit,
     args = (orbit_v, orbit_t, epoch, safety_check)
     bounds = [(wait_l, wait_r), (trans_l, trans_r)]
     result = dual_annealing(_call_solve_lambert, bounds, args, 50)
-    wt, tt = result.x[0], result.x[1]
+    wt, tt = result.x
     lambert = _solve_lambert(wt, tt, orbit_v, orbit_t, epoch)
     return lambert.change_orbit(orbit_v)
     
 def _call_solve_lambert(paras, orbit_v, orbit_t, epoch, safety_check):
     t1, t2 = paras[0], paras[1]
     lambert = _solve_lambert(t1, t2, orbit_v, orbit_t, epoch)
-    total_dv = lambert.get_total_cost().to_value(u.m / u.s)
+    total_dv = lambert.get_total_cost()
     if safety_check and not lambert.is_safe():
         total_dv += 1e16
     return total_dv
 
-def _solve_lambert(t1, t2, orbit_v, orbit_t, epoch):
+def _solve_lambert(t1, t2, orbit_v: Orbit, orbit_t: Orbit, epoch):
     from .create import Maneuver
     start_epoch = t1 + epoch
-    orbit_S = orbit_v.propagate_to_epoch(start_epoch * u.s)
+    orbit_S = orbit_v.propagate_to_epoch(start_epoch)
     end_epoch = t2 + start_epoch
-    orbit_R = orbit_t.propagate_to_epoch(end_epoch * u.s)
+    orbit_R = orbit_t.propagate_to_epoch(end_epoch)
     lambert = Maneuver.lambert(orbit_S, orbit_R)
     return lambert
 
@@ -133,7 +132,7 @@ def opt_lambert_revolution(orbit_v, orbit_t, safe_check=True):
         Maneuver: 双脉冲转移机动
     """
     from .create import Maneuver
-    min_dv = np.inf * u.km / u.s
+    min_dv = np.inf
     best_lam = None
     m = 0
     lowpath = False

@@ -1,88 +1,65 @@
 import numpy as np
-from functools import cached_property
-import threading
-from astropy import units as u
 
+from .constants import KSP_BODY_CONSTANTS
 from .utils import UTIL_CONN
 
 
-__all__ = [
-    'Body',
-    'KSP_Sun',
-    'KSP_Earth',
-    'KSP_Moon',
-    'BODY_DIC',
-]
-
-
 class Body:
-    def __init__(self,
-                 name: str,
-                 attractor,
-                 r: u.Quantity,
-                 mu: u.Quantity,
-                 soi: u.Quantity,
-                 rotational_period: u.Quantity,
-                 atomsphere_height: u.Quantity = 0 * u.km,
-                 ):
-        self.name = name
-        self.attractor: Body = attractor
-        self.r = r
-        self.mu = mu
-        self.soi = soi
-        self.rotational_period = rotational_period
-        self.atomsphere_height = atomsphere_height
-        self.has_atmosphere = self.atomsphere_height > 0 * u.km
+    _instances = {}
+
+    def __new__(cls, name, *args, **kwargs):
+        if name not in cls._instances:
+            cls._instances[name] = super().__new__(cls)
+        return cls._instances[name]
+
+    def __init__(self, name, attractor_name, mass, mu, r, initial_rotation, 
+                 rotational_period, soi, atmosphere_height, angular_velocity):
+        # NOTE: 所有KSP天体轴倾一致, 因此我们只需要角速度矢量即可定义天体, 对于实际情况是不成立的
+        if '_initialized' in self.__dict__:
+            return
+        self._initialized = True
+
+        self.name               = name
+        self._attractor_name    = attractor_name
+        self.mass               = mass
+        self.mu                 = mu
+        self.r                  = r
+        self.initial_rotation   = initial_rotation
+        self.rotational_period  = rotational_period
+        self.soi                = soi
+        self.atmosphere_height  = atmosphere_height
+        self.has_atmosphere     = atmosphere_height > 0
+        self.angular_velocity   = np.asarray(angular_velocity, dtype=np.float64)
+
+    @classmethod
+    def get_or_create(cls, name):
+        if name in cls._instances:
+            return cls._instances[name]
+        bc                      = KSP_BODY_CONSTANTS[name]
+        attractor_name          = bc['attractor']
+        mass                    = bc['mass']
+        mu                      = bc['gravational_parameter']
+        r                       = bc['equatorial_radius']
+        initial_rotation        = bc['initial_rotation']
+        rotational_period       = bc['rotational_period']
+        soi                     = bc['sphere_of_influence']
+        atmosphere_height       = bc['atmosphere_height']
+        angular_velocity        = np.array(bc['angular_velocity'], dtype=np.float64)
+        return cls(name, attractor_name, mass, mu, r, initial_rotation, 
+                   rotational_period, soi, atmosphere_height, angular_velocity)
+
+    @property
+    def attractor(self):
+        return Body.get_or_create(self._attractor_name)
+
+    @property
+    def is_star(self):
+        return self.attractor is None
 
     @property
     def krpc_body(self):
         return UTIL_CONN.space_center.bodies[self.name]
         
-    @cached_property
-    def angular_velocity(self) -> u.Quantity:
-        ref = self.krpc_body.non_rotating_reference_frame
-        angular_vel = -np.array(self.krpc_body.angular_velocity(ref), dtype=np.float64) * u.rad / u.s
-        angular_vel[1], angular_vel[2] = angular_vel[2], angular_vel[1]
-        return angular_vel
-
-    @property
-    def orbit(self):
+    def orbit(self, epoch):
         from .orbit import Orbit
-        return Orbit.from_krpcorb(self.krpc_body.orbit)
-
-
-KSP_Sun = Body(
-    name='Sun',
-    attractor=None,
-    r=None,
-    mu=None,
-    soi=None,
-    rotational_period=None,
-)
-
-KSP_Earth = Body(
-    name='Earth',
-    attractor=KSP_Sun,
-    r=6.371e3 * u.km,
-    mu=3.9860044615e5 * u.km ** 3 / u.s ** 2,
-    soi=924649.216 * u.km,
-    rotational_period=86164.1015625 * u.s,
-    atomsphere_height = 140 * u.km,
-)
-
-KSP_Moon = Body(
-    name='Moon',
-    attractor=KSP_Earth,
-    r=1.7371e3 * u.km,
-    mu=4.9028000645e3 * u.km ** 3 / u.s ** 2,
-    soi=66167.16 * u.km,
-    rotational_period=2370996.25 * u.s,
-    atomsphere_height = 0 * u.km,
-)
-
-
-BODY_DIC = {
-    'Sun': KSP_Sun,
-    'Earth': KSP_Earth,
-    'Moon': KSP_Moon,
-}
+        return Orbit.from_krpcorb(self.krpc_body.orbit).propagate_to_epoch(epoch)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from astropy import units as u
+import numpy.linalg as npl
 
 from ..core.rotation import *
 from ..orbit.create import Orbit
@@ -10,27 +10,26 @@ from ..body import *
 class ReferenceFrame:
     def __init__(self,
                  parent: ReferenceFrame | None,
-                 origin: np.ndarray = np.zeros(3) * u.km, 
-                 rotation: np.ndarray = np.eye(3), 
-                 velocity: np.ndarray = np.zeros(3) * u.km / u.s, 
-                 angular_velocity: np.ndarray = np.zeros(3) * u.rad / u.s,
-                 epoch: u.Quantity = 0 * u.s
-                 ):
+                 origin: np.ndarray = None, 
+                 rotation: np.ndarray = None,
+                 velocity: np.ndarray = None, 
+                 angular_velocity: np.ndarray = None,
+                 epoch: float = 0):
         """构建参考系
 
         Args:
             parent (ReferenceFrame): 父参考系
-            origin (ndarray[Quantity], optional): 相对于父参考系的原点位置向量. Defaults to np.zeros(3).
-            rotation (ndarray[Quantity], optional): 向父参考系转换的方向余弦矩阵. Defaults to np.eye(3).
-            velocity (ndarray[Quantity], optional): 参考系平移速度向量. Defaults to np.zeros(3).
-            angular_velocity (ndarray[Quantity], optional): 参考系的角速度. Defaults to np.zeros(3).
-            epoch (Quantity): KSPRO历元时刻, 用于确定天体相对位置. Defaults to 0.
+            origin (ndarray, optional): 相对于父参考系的原点位置向量.
+            rotation (ndarray, optional): 向父参考系转换的方向余弦矩阵.
+            velocity (ndarray, optional): 参考系平移速度向量.
+            angular_velocity (ndarray, optional): 参考系的角速度.
+            epoch (float): KSPRO历元时刻, 用于确定天体相对位置.
         """
         self.parent = parent
-        self.origin = origin
-        self.rotation = rotation
-        self.velocity = velocity
-        self.angular_velocity = angular_velocity
+        self.origin = origin if origin is not None else np.zeros(3)
+        self.rotation = rotation if rotation is not None else np.eye(3)
+        self.velocity = velocity if velocity is not None else np.zeros(3)
+        self.angular_velocity = angular_velocity if angular_velocity is not None else np.zeros(3)
         self.epoch = epoch
         
     def transform_d_to_parent(self, direction):
@@ -136,23 +135,28 @@ SCI = ReferenceFrame(None)
 
 class BCIFrame(ReferenceFrame):
     """天体中心惯性参考系"""
+    # NOTE: 重要: 所有天体在KSP中的轴倾都是一致的[0, 0, 1]
+    # 因此现在BCI参考系可以和KRPC中non_rotating_ref混用, 这在真实情况下是不成立的
+    # 如果要适配真实轴倾, 必须要建立一个地理坐标系与non_rotating_ref兼容
     def __init__(self, 
                  body: Body, 
-                 epoch: u.Quantity):
+                 epoch: float):
         self.body = body
         self._parent = None
         self._origin = None
         self._velocity = None
+        self.rotation = np.eye(3)
+        self.angular_velocity = np.zeros(3)
         self.epoch = epoch
 
     def _sync(self):
-        orb = self.body.orbit.propagate_to_epoch(self.epoch)
+        orb = self.body.orbit(self.epoch)
         self._origin = orb.r_vec
         self._velocity = orb.v_vec
 
     @property
     def parent(self):
-        if self.body is KSP_Sun:
+        if self.body.is_star:
             return None
         if self._parent is None:
             self._parent = BCIFrame(self.body.attractor, self.epoch)
@@ -170,31 +174,6 @@ class BCIFrame(ReferenceFrame):
             self._sync()
         return self._velocity
 
-    @property
-    def rotation(self):
-        return np.eye(3)
-    
-    @property
-    def angular_velocity(self):
-        return np.zeros(3) / u.s
-
-
-class ENUFrame(ReferenceFrame):
-    @classmethod
-    def from_bci_position(self, body: Body, position: u.Quantity, epoch: u.Quantity):
-        rotation = ENU_rotation(position.to_value(u.km))
-        body_angular_velocity = body.angular_velocity
-        velocity = np.cross(body_angular_velocity, position)
-        angular_velocity = rotation.T @ body_angular_velocity
-        return ENUFrame(
-            BCIFrame(body, epoch),
-            position,
-            rotation,
-            velocity,
-            angular_velocity,
-            epoch
-        )
-        
 
 class TNWFrame(ReferenceFrame):
     """切向-径向-法向参考系"""
@@ -210,24 +189,19 @@ class TNWFrame(ReferenceFrame):
             TNWFrame: 轨道参考系
         """
         parent = BCIFrame(orbit.attractor, orbit.epoch)
-        position = orbit.r_vec.to_value(u.km)
-        velocity = orbit.v_vec.to_value(u.km / u.s)
+        position = orbit.r_vec
+        velocity = orbit.v_vec
         h = np.cross(position, velocity)
         rotation = TNW_rotation(position, velocity)
         angular_velocity = h / np.linalg.norm(position) ** 2
         return TNWFrame(
             parent,
-            position * u.km, 
+            position,
             rotation, 
-            velocity * u.km / u.s, 
-            angular_velocity / u.s,
-            orbit.epoch
+            velocity,
+            angular_velocity,
+            epoch = orbit.epoch
         )
-
-    @classmethod
-    def transform_d_from_left_hand(cls, vector):
-        vector = np.array(vector, dtype=np.float64)
-        return np.array([vector[1], vector[0], vector[2]], dtype=np.float64)
         
 
 class OrbitalFrame(ReferenceFrame):
@@ -247,14 +221,14 @@ class OrbitalFrame(ReferenceFrame):
             OrbitalFrame: 轨道参考系
         """
         parent = BCIFrame(orbit.attractor, orbit.epoch)
-        position = orbit.r_vec.to_value(u.km)
-        velocity = orbit.v_vec.to_value(u.km / u.s)
+        position = orbit.r_vec
+        velocity = orbit.v_vec
         rotation = TNW_rotation(position, velocity)
         return OrbitalFrame(
             parent,
-            position * u.km, 
+            position,
             rotation, 
-            velocity * u.km / u.s,
+            velocity,
             epoch = orbit.epoch
         )
 
@@ -271,20 +245,15 @@ class LocalAttitudeFrame(ReferenceFrame):
     @staticmethod
     def from_orbit(orbit: Orbit):
         parent = BCIFrame(orbit.attractor, orbit.epoch)
-        position = orbit.r_vec.to_value(u.km)
-        velocity = orbit.v_vec.to_value(u.km / u.s)
+        position = orbit.r_vec
+        velocity = orbit.v_vec
         rotation = TNW_rotation(position, velocity)
         return LocalAttitudeFrame(
             parent,
-            position * u.km, 
+            position,
             rotation,
             epoch = orbit.epoch
         )
-
-    @classmethod
-    def transform_d_from_left_hand(cls, vector):
-        vector = np.array(vector, dtype=np.float64)
-        return np.array([vector[1], vector[0], vector[2]], dtype=np.float64)
 
 
 class PQWFrame(ReferenceFrame):
@@ -294,9 +263,9 @@ class PQWFrame(ReferenceFrame):
     @staticmethod
     def from_orbit(orbit: Orbit):
         parent = BCIFrame(orbit.attractor, orbit.epoch)
-        r = orbit.r_vec.to_value(u.km)
-        v = orbit.v_vec.to_value(u.km / u.s)
-        GM = orbit.attractor.mu.to_value(u.km ** 3 / u.s ** 2)
+        r = orbit.r_vec
+        v = orbit.v_vec
+        GM = orbit.attractor.mu
         rotation = PQW_rotation_rv(r, v, GM)
         return PQWFrame(parent, rotation=rotation)
 

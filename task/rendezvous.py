@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
-from astropy import units as u
 
 from .tasks import Task
 from .maneuver import ExecuteNode
@@ -23,17 +22,16 @@ class Rendezvous(Task):
                  spacecraft: Spacecraft,
                  spacestation: SpaceStation,
                  tasks: Tasks,
-                 start_time: u.Quantity = -1 * u.s,
-                 duration: u.Quantity = 300 * u.s,
+                 start_time: float = -1,
+                 duration: float = 300,
                  importance: int = 6, 
-                 submit_next: bool = True,
-                 ):
+                 submit_next: bool = True):
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.spacestation = spacestation
 
     @property
     def description(self):
-        return (f'{self.name} -> {self.spacestation.name} 交会规划\n'
+        return (f'{self.spacecraft.name} -> {self.spacestation.name} 交会规划\n'
                 f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
@@ -61,19 +59,19 @@ class Rendezvous(Task):
     def _to_dict(self):
         dic = {
             'spacestation_name': self.spacestation.name,
-            }
+        }
         return super()._to_dict() | dic
     
     @classmethod
     def _from_dict(cls, data, tasks):
         from ..spacecrafts import Spacecraft
         return cls(
-            spacecraft = Spacecraft.get(data['spacecraft_name']),
-            spacestation = Spacecraft.get(data['spacestation_name']),
-            tasks = tasks,
-            start_time = data['start_time'] * u.s,
-            duration = data['duration'] * u.s,
-            importance = data['importance'],
-            submit_next = data['submit_next'],
-            )
+            spacecraft      = Spacecraft.get(data['spacecraft_name']),
+            spacestation    = Spacecraft.get(data['spacestation_name']),
+            tasks           = tasks,
+            start_time      = data['start_time'],
+            duration        = data['duration'],
+            importance      = data['importance'],
+            submit_next     = data['submit_next'],
+        )
         

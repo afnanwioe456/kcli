@@ -1,6 +1,5 @@
 import numpy as np
 import numpy.linalg as npl
-from astropy import units as u
 import time
 
 from .reentry_simulation import ReentrySimulation
@@ -40,8 +39,7 @@ def deorbit(spacecraft: Spacecraft, landing_coord: tuple[float, float], deorbit_
     bcbf_ref        = body.reference_frame
     # 注意此处orbit和landing_site时刻相同(t0)
     orbit           = Orbit.from_krpcv(vessel)
-    epoch_orbit     = orbit.epoch.to_value(u.s)
-    body_h          = orbit.attractor.angular_velocity.to_value(u.rad / u.s)
+    body_h          = orbit.attractor.angular_velocity
     n               = mv.normalize(body_h)
     landing_site    = body.surface_position(*landing_coord, bci_ref)
     landing_site    = BCIFrame.transform_d_from_left_hand(landing_site)
@@ -52,7 +50,7 @@ def deorbit(spacecraft: Spacecraft, landing_coord: tuple[float, float], deorbit_
     # revisit_epochs  = []
     # for t in phi_window:
     #     # 计算着陆窗口时着陆场的位置
-    #     t               = t.to_value(u.s)
+    #     t               = t
     #     deorbit_epoch   = t - t_landing
     #     t_rotate        = t - t0
     #     theta_rotate    = t_rotate / body_period * 2 * np.pi
@@ -78,18 +76,18 @@ def deorbit(spacecraft: Spacecraft, landing_coord: tuple[float, float], deorbit_
     #     deorbit_epoch   = revisit_epoch + t_waiting
     #     revisit_epochs.append((revisit_epoch, deorbit_epoch))
     # revisit_epoch, deorbit_epoch = min(revisit_epochs, key=lambda x: x[0])
-    # phase_mnv       = Maneuver.change_phase(orbit_pe, revisit_epoch * u.s, at_pe=True, safety_check=False, conserved=False)
+    # phase_mnv       = Maneuver.change_phase(orbit_pe, revisit_epoch, at_pe=True, safety_check=False, conserved=False)
     # orbit_phase     = phase_mnv.apply()
     # # print(f'change phase: {orbit_pe.epoch} dt: {orbit_pe.epoch - orbit.epoch}')
     # # print(phase_mnv)
-    # orbit_phase     = orbit_phase.propagate_to_epoch(revisit_epoch * u.s)
+    # orbit_phase     = orbit_phase.propagate_to_epoch(revisit_epoch)
     # circular_mnv    = Maneuver.change_apoapsis(orbit_phase, orbit_phase.pe, at_pe=False)
     # orbit_cir       = circular_mnv.apply()
     # # print(f'circularize: {orbit_phase.epoch} dt: {orbit_phase.epoch - orbit.epoch}')
     # # print(circular_mnv)
     # # 不真正执行减速点火, 而是在进入滑行轨道后重新估计弥补误差
-    # # orbit_de        = orbit_cir.propagate_to_epoch(deorbit_epoch * u.s)
-    # # deorbit_mnv     = Maneuver.change_apoapsis(orbit_de, deorbit_alt * u.m, at_pe=False)
+    # # orbit_de        = orbit_cir.propagate_to_epoch(deorbit_epoch)
+    # # deorbit_mnv     = Maneuver.change_apoapsis(orbit_de, deorbit_alt, at_pe=False)
     # # print(f'deorbit: {orbit_de.epoch} dt: {orbit_de.epoch - orbit.epoch}')
     # # print(deorbit_mnv)
     # mnv             = Maneuver.serial(orbit, [phase_mnv, circular_mnv])
@@ -99,13 +97,12 @@ def deorbit(spacecraft: Spacecraft, landing_coord: tuple[float, float], deorbit_
 
     # FIXME: 如果轨道倾角低于纬度
     # 估算圆轨道, 同时初次到达近地点
-    # FIXME: 圆轨道传播方法
-    circular_mnv    = Maneuver.change_apoapsis(orbit, orbit.pe + 1 * u.km)
+    circular_mnv    = Maneuver.change_apoapsis(orbit, orbit.pe)
     orbit_cir       = circular_mnv.apply()
-    period_cir      = orbit_cir.period.to_value(u.s)
-    h_vec_cir       = orbit_cir.h_vec.to_value(u.m ** 2 / u.s)
-    pos_pe          = orbit_cir.r_vec.to_value(u.m)
-    t_pe            = orbit_cir.epoch.to_value(u.s) - epoch_orbit
+    period_cir      = orbit_cir.period
+    h_vec_cir       = orbit_cir.h_vec
+    pos_pe          = orbit_cir.r_vec
+    t_pe            = orbit_cir.epoch - orbit.epoch
 
     # 计算着陆点与轨道面重合窗口
     phi_window      = mr.solve_rotation_angle(landing_site, h_vec_cir, n, np.pi / 2)
@@ -127,50 +124,62 @@ def deorbit(spacecraft: Spacecraft, landing_coord: tuple[float, float], deorbit_
         # 如果允许的话, 规划一个调相机动, 在着陆场与轨道面重合时达到倾角机动位置, 减少倾角机动消耗
         # 当前轨道 -> 近地点 -> 调相 -> 重返近地点 -> 圆化 -> 倾角(重合窗口) -> 降轨
         # 重返时刻 = 当前时刻 + 重合时间 - 近地点到倾角时间 - 当前位置到近地点时间
+        # FIXME: 如果调相时间过短
         t_window        = phi_window / (2 * np.pi) * body_period
-        epoch_revisit   = epoch_orbit + t_window - t_waiting - t_pe
-        phase_mnv       = Maneuver.change_phase(orbit_cir, epoch_revisit, at_pe=True)
+        # 提前t_waiting到达近地点
+        epoch_revisit   = orbit.epoch + t_window - t_waiting
+        orbit_pe        = orbit.propagate_to_nu(0)
+        phase_mnv       = Maneuver.change_phase(orbit_pe, epoch_revisit)
         orbit_phase     = phase_mnv.apply()
+        # 传播到近地点并圆化轨道
         orbit_phase     = orbit_phase.propagate_to_epoch(epoch_revisit)
         circular_mnv    = Maneuver.change_apoapsis(orbit_phase, orbit.pe, immediate=True)
         orbit_cir       = circular_mnv.apply()
-        orbit_approx    = orbit_cir.propagate(t_waiting * u.s)
-        h_dir_approx    = orbit_approx.h_vec.to_value(u.m ** 2 / u.s)
+        # FIXME: 不真正执行后续任务而是将这个任务返回
+        # 从近地点滑行到倾角机动点
+        orbit_approx    = orbit_cir.propagate(t_waiting)
+        h_dir_approx    = orbit_approx.h_vec
         dv              = phase_mnv.get_total_cost() + circular_mnv.get_total_cost()
+        # 从初始轨道到倾角机动的时间
         t_to_mnv        = t_window
     else:
         # 如果不进行调相机动, 构建重合轨道, 即经过倾角机动和当前着陆场位置的轨道, 作为倾角机动估计
         # 当前轨道 -> 近地点 -> 圆化 -> 倾角 -> 降轨
         h_dir_approx    = np.cross(mnv_dir, landing_site)
-        r_vec_new       = orbit_cir.r.to_value(u.m) * mv.normalize(mnv_dir)
+        r_vec_new       = orbit_cir.r * mv.normalize(mnv_dir)
         v_dir           = np.cross(h_dir_approx, r_vec_new)
         v_vec_new       = (npl.norm(h_vec_cir) / npl.norm(r_vec_new)) * mv.normalize(v_dir)
-        orbit_approx    = Orbit.from_rv(orbit_cir.attractor, r_vec_new * u.m, v_vec_new * u.m / u.s, orbit_cir.epoch)
+        orbit_approx    = Orbit.from_rv(orbit_cir.attractor, r_vec_new, v_vec_new, orbit_cir.epoch)
+        # 预估这次机动的dv
         inc_mnv         = Maneuver.match_plane(orbit_cir, orbit_approx, conserved=True)
         dv              = inc_mnv.get_total_cost() + circular_mnv.get_total_cost()
         t_to_mnv        = t_waiting + t_pe
 
 
     # FIXME: 这里大致估计了一下改变倾角后滑行到减速位置经过的角度theta - angle_landing
-    orbit_approx    = orbit_approx.propagate_to_nu(orbit_approx.nu + 45 * u.deg, prograde=True)
+    # 弥补非惯性力不一致的问题
+    # NOTE: 也许可以根据着陆场位置估算? 当前落月初始误差不超过1km
+    orbit_approx    = orbit_approx.propagate_to_nu(orbit_approx.nu + np.pi / 4)
     # 假设降低轨道用于降落估计
-    deorbit_mnv     = Maneuver.change_apoapsis(orbit_approx, deorbit_alt * u.m, immediate=True)
+    deorbit_mnv     = Maneuver.change_apoapsis(orbit_approx, deorbit_alt, immediate=True)
     orbit_de        = deorbit_mnv.apply()
 
     # 估计所有机动消耗的质量
     dv              += deorbit_mnv.get_total_cost()
-    dv              = dv.to_value(u.m / u.s)
+    dv              = dv
     sim_mass        = _mass_after_mnv(dv, vessel.mass, vessel.specific_impulse_at(0))
+    # FIXME
+    sim_mass = vessel.mass
 
-    t0              = orbit_de.epoch.to_value(u.s)
-    x0              = orbit_de.r_vec.to_value(u.m)
+    t0              = orbit_de.epoch
+    x0              = orbit_de.r_vec
     
     sim_params = {
         'dry_mass':             vessel.dry_mass,
         'mass':                 sim_mass,
         'min_throttle_cmp':     0.374866,
         'max_throttle_cmp':     1,
-        'sim_throttle':         0.8,
+        'sim_throttle':         0.9,
         'landing_asl':          landing_asl,
         'vac_thrust':           vessel.max_thrust_at(0),
         'vac_isp':              vessel.specific_impulse_at(0),
@@ -237,19 +246,19 @@ def deorbit(spacecraft: Spacecraft, landing_coord: tuple[float, float], deorbit_
     # 滑行至降轨机动
     t_gliding       = (theta - angle_landing) / (2 * np.pi) * period_cir
 
-    # FIXME: 倾角机动
-    orbit_inc       = orbit_cir.propagate_to_epoch(orbit.epoch + (t_to_mnv - 60) * u.s)
+    orbit_inc       = orbit_cir.propagate_to_epoch(orbit.epoch + (t_to_mnv - 60))
     h_dir           = np.cross(mnv_dir, landing_site_t)
-    r_vec_new       = orbit_inc.r.to_value(u.m) * mv.normalize(mnv_dir)
+    # 这里由于mnv_dir已经是提前pi/2的位置, 所以不需要判断方向
+    r_vec_new       = orbit_inc.r * mv.normalize(mnv_dir)
     v_dir           = np.cross(h_dir, r_vec_new)
     v_vec_new       = (npl.norm(h_vec_cir) / npl.norm(r_vec_new)) * mv.normalize(v_dir)
-    orbit_target    = Orbit.from_rv(orbit_inc.attractor, r_vec_new * u.m, v_vec_new * u.m / u.s, orbit_inc.epoch)
+    orbit_target    = Orbit.from_rv(orbit_inc.attractor, r_vec_new, v_vec_new, orbit_inc.epoch)
     inc_mnv         = Maneuver.match_plane(orbit_inc, orbit_target, closest=True, conserved=True)
     
     # 降轨
     orbit_de        = inc_mnv.apply()
-    orbit_de        = orbit_de.propagate(t_gliding * u.s)
-    deorbit_mnv     = Maneuver.change_apoapsis(orbit_de, deorbit_alt * u.m, immediate=True)
+    orbit_de        = orbit_de.propagate(t_gliding)
+    deorbit_mnv     = Maneuver.change_apoapsis(orbit_de, deorbit_alt, immediate=True)
 
     if phase_flag:
         mnv = Maneuver.serial(orbit, [phase_mnv, circular_mnv, inc_mnv, deorbit_mnv])
@@ -258,14 +267,14 @@ def deorbit(spacecraft: Spacecraft, landing_coord: tuple[float, float], deorbit_
         
     mnv.to_krpcv(vessel)
 
-    # orbit_inc = orbit_inc.propagate(60 * u.s)
-    # print(f'inc mnv pos diff: {np.rad2deg(mv.angle_between_vectors(mnv_dir, orbit_inc.r_vec.to_value(), orbit_inc.h_vec.to_value()))}')
-    # orbit_f = mnv.apply()
-    # print(mnv)
-    # print(f'deorbit epoch diff: {orbit_f.epoch - t_gliding * u.s - t_to_mnv * u.s - orbit.epoch}')
-    # print(f'landing site diff: {np.rad2deg(mv.angle_between_vectors(landing_site_t, orbit_f.h_vec.to_value()))}')
-    # input('ready to cheat')
-    # print(orbit_f.cheat())
+    orbit_inc = orbit_inc.propagate(60)
+    print(f'inc mnv pos diff: {np.rad2deg(mv.angle_between_vectors(mnv_dir, orbit_inc.r_vec, orbit_inc.h_vec))}')
+    orbit_f = mnv.apply()
+    print(mnv)
+    print(f'deorbit epoch diff: {orbit_f.epoch - t_gliding - t_to_mnv - orbit.epoch}')
+    print(f'landing site diff: {np.rad2deg(mv.angle_between_vectors(landing_site_t, orbit_f.h_vec))}')
+    input('ready to cheat')
+    print(orbit_f.cheat())
 
 
 def _find_rotation_angle(v, u, n, a, b, guess):
@@ -325,14 +334,14 @@ def landing(spacecraft: Spacecraft, landing_coord: tuple):
     debug_line      = True
     debug_line_len  = 10
 
-    final_height    = 300
-    max_tilt        = 10 / 180 * np.pi
+    final_height    = 500
+    max_tilt        = np.deg2rad(10)
     mass            = vessel.mass
     vac_thrust      = vessel.max_thrust_at(0)
     vac_isp         = vessel.specific_impulse_at(0)
     asl_thrust      = vessel.max_thrust_at(1)
     asl_isp         = vessel.specific_impulse_at(1)
-    sim_throttle    = 0.8
+    sim_throttle    = 0.9
     min_throttle_cmp    = 0.374866
     max_throttle_cmp    = 1
     min_throttle_ctrl   = 0.001

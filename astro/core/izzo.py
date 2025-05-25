@@ -1,5 +1,5 @@
-from numpy import arccos, pi, sqrt, cross, array, floor, arcsinh, divide, inf, exp, log
-from numpy.linalg import norm
+import numpy as np
+import numpy.linalg as npl
 from numba import njit
 
 @njit
@@ -42,46 +42,46 @@ def izzo(k, r1, r2, tof, M=0, prograde=True, lowpath=True, numiter=35, rtol=1e-8
     assert k > 0
 
     # Check collinearity of r1 and r2
-    if not cross(r1, r2).any():
+    if not np.cross(r1, r2).any():
         raise ValueError(
             "Lambert solution cannot be computed for collinear vectors"
         )
 
     # Chord
     c = r2 - r1
-    c_norm, r1_norm, r2_norm = norm(c), norm(r1), norm(r2)
+    c_norm, r1_norm, r2_norm = np.norm(c), np.norm(r1), np.norm(r2)
 
     # Semiperimeter
     s = (r1_norm + r2_norm + c_norm) * 0.5
 
     # Versors
     i_r1, i_r2 = r1 / r1_norm, r2 / r2_norm
-    i_h = cross(i_r1, i_r2)
-    i_h = i_h / norm(i_h)  # Fixed from paper
+    i_h = np.cross(i_r1, i_r2)
+    i_h = i_h / np.norm(i_h)  # Fixed from paper
 
     # Geometry of the problem
-    ll = sqrt(1 - min(1.0, c_norm / s))
+    ll = np.sqrt(1 - min(1.0, c_norm / s))
 
     # Compute the fundamental tangential directions
     if i_h[2] < 0:
         ll = -ll
-        i_t1, i_t2 = cross(i_r1, i_h), cross(i_r2, i_h)
+        i_t1, i_t2 = np.cross(i_r1, i_h), np.cross(i_r2, i_h)
     else:
-        i_t1, i_t2 = cross(i_h, i_r1), cross(i_h, i_r2)
+        i_t1, i_t2 = np.cross(i_h, i_r1), np.cross(i_h, i_r2)
 
     # Correct transfer angle parameter and tangential vectors if required
     ll, i_t1, i_t2 = (ll, i_t1, i_t2) if prograde else (-ll, -i_t1, -i_t2)
 
     # Non dimensional time of flight
-    T = sqrt(2 * k / s**3) * tof
+    T = np.sqrt(2 * k / s**3) * tof
 
     # Find solutions
     x, y = _find_xy(ll, T, M, numiter, lowpath, rtol)
 
     # Reconstruct
-    gamma = sqrt(k * s / 2)
+    gamma = np.sqrt(k * s / 2)
     rho = (r1_norm - r2_norm) / c_norm
-    sigma = sqrt(1 - rho**2)
+    sigma = np.sqrt(1 - rho**2)
 
     # Compute the radial and tangential components at r0 and r
     V_r1, V_r2, V_t1, V_t2 = _reconstruct(
@@ -112,11 +112,11 @@ def _find_xy(ll, T, M, numiter, lowpath, rtol):
     assert abs(ll) < 1
     assert T > 0  # Mistake in the original paper
 
-    M_max = floor(T / pi)
-    T_00 = arccos(ll) + ll * sqrt(1 - ll**2)  # T_xM
+    M_max = np.floor(T / np.pi)
+    T_00 = np.arccos(ll) + ll * np.sqrt(1 - ll**2)  # T_xM
 
     # Refine maximum number of revolutions if necessary
-    if T < T_00 + M_max * pi and M_max > 0:
+    if T < T_00 + M_max * np.pi and M_max > 0:
         _, T_min = _compute_T_min(ll, M_max, numiter, rtol)
         if T < T_min:
             M_max -= 1
@@ -139,7 +139,7 @@ def _find_xy(ll, T, M, numiter, lowpath, rtol):
 @njit
 def _compute_y(x, ll):
     """Computes y."""
-    return sqrt(1 - ll**2 * (1 - x**2))
+    return np.sqrt(1 - ll**2 * (1 - x**2))
 
 
 @njit
@@ -153,11 +153,11 @@ def _compute_psi(x, y, ll):
     if -1 <= x < 1:
         # Elliptic motion
         # Use arc cosine to avoid numerical errors
-        return arccos(x * y + ll * (1 - x**2))
+        return np.arccos(x * y + ll * (1 - x**2))
     elif x > 1:
         # Hyperbolic motion
         # The hyperbolic sine is bijective
-        return arcsinh((y - x * ll) * sqrt(x**2 - 1))
+        return np.arcsinh((y - x * ll) * np.sqrt(x**2 - 1))
     else:
         # Parabolic motion
         return 0.0
@@ -172,15 +172,15 @@ def _tof_equation(x, T0, ll, M):
 @njit
 def _tof_equation_y(x, y, T0, ll, M):
     """Time of flight equation with externally computated y."""
-    if M == 0 and sqrt(0.6) < x < sqrt(1.4):
+    if M == 0 and np.sqrt(0.6) < x < np.sqrt(1.4):
         eta = y - ll * x
         S_1 = (1 - ll - x * eta) * 0.5
         Q = 4 / 3 * _hyp2f1b(S_1)
         T_ = (eta**3 * Q + 4 * ll * eta) * 0.5
     else:
         psi = _compute_psi(x, y, ll)
-        T_ = divide(
-            divide(psi + M * pi, sqrt(abs(1 - x**2))) - x + ll * y,
+        T_ = np.divide(
+            np.divide(psi + M * np.pi, np.sqrt(abs(1 - x**2))) - x + ll * y,
             (1 - x**2),
         )
 
@@ -215,7 +215,7 @@ def _compute_T_min(ll, M, numiter, rtol):
         T_min = _tof_equation(x_T_min, 0.0, ll, M)
     else:
         if M == 0:
-            x_T_min = inf
+            x_T_min = np.inf
             T_min = 0.0
         else:
             # Set x_i > 0 to avoid problems at ll = -1
@@ -232,7 +232,7 @@ def _initial_guess(T, ll, M, lowpath):
     """Initial guess."""
     if M == 0:
         # Single revolution
-        T_0 = arccos(ll) + ll * sqrt(1 - ll**2) + M * pi  # Equation 19
+        T_0 = np.arccos(ll) + ll * np.sqrt(1 - ll**2) + M * np.pi  # Equation 19
         T_1 = 2 * (1 - ll**3) / 3  # Equation 21
         if T >= T_0:
             x_0 = (T_0 / T) ** (2 / 3) - 1
@@ -244,23 +244,23 @@ def _initial_guess(T, ll, M, lowpath):
             # Corrected initial guess,
             # piecewise equation right after expression (30) in the original paper is incorrect
             # See https://github.com/poliastro/poliastro/issues/1362
-            x_0 = exp(log(2) * log(T / T_0) / log(T_1 / T_0)) - 1
+            x_0 = np.exp(np.log(2) * np.log(T / T_0) / np.log(T_1 / T_0)) - 1
 
         return x_0
     else:
         # Multiple revolution
-        x_0l = (((M * pi + pi) / (8 * T)) ** (2 / 3) - 1) / (
-            ((M * pi + pi) / (8 * T)) ** (2 / 3) + 1
+        x_0l = (((M * np.pi + np.pi) / (8 * T)) ** (2 / 3) - 1) / (
+            ((M * np.pi + np.pi) / (8 * T)) ** (2 / 3) + 1
         )
-        x_0r = (((8 * T) / (M * pi)) ** (2 / 3) - 1) / (
-            ((8 * T) / (M * pi)) ** (2 / 3) + 1
+        x_0r = (((8 * T) / (M * np.pi)) ** (2 / 3) - 1) / (
+            ((8 * T) / (M * np.pi)) ** (2 / 3) + 1
         )
 
         # Select one of the solutions according to desired type of path
         x_0 = (
-            max(array([x_0l, x_0r]))
+            max(np.array([x_0l, x_0r]))
             if lowpath
-            else min(array([x_0l, x_0r]))
+            else min(np.array([x_0l, x_0r]))
         )
 
         return x_0
@@ -338,7 +338,7 @@ def _hyp2f1b(x):
 
     """
     if x >= 1.0:
-        return inf
+        return np.inf
     else:
         res = 1.0
         term = 1.0

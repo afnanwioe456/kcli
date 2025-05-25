@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
-from astropy import units as u
 from dateutil import parser, tz
 from datetime import datetime, timedelta
 import random
@@ -8,7 +7,6 @@ import string
 import logging
 
 import krpc
-import krpc.services
 
 if TYPE_CHECKING:
     from krpc.services.spacecenter import Vessel, Part
@@ -77,20 +75,20 @@ UTIL_CONN = None if _DEBUG_MODE else krpc.connect('kcli')
 
 ### IN-GAME TIME CONTROL ###
 
-def get_ut() -> u.Quantity:
+def get_ut() -> float:
     if _DEBUG_MODE:
-        return 0 * u.s
-    return UTIL_CONN.space_center.ut * u.s
+        return 0
+    return UTIL_CONN.space_center.ut
 
 
-def time_wrap(start_time: u.Quantity):
-    ut = UTIL_CONN.space_center.ut * u.s
+def time_wrap(start_time):
+    ut = UTIL_CONN.space_center.ut
     if ut < start_time:
         LOGGER.debug(f'time wrapping to {sec_to_date(start_time)} ...')
-        UTIL_CONN.space_center.warp_to(start_time.to_value(u.s))
+        UTIL_CONN.space_center.warp_to(start_time, max_rails_rate=1e8)
 
 
-def date_to_sec(input_date: str) -> u.Quantity | None:
+def date_to_sec(input_date: str) -> float | None:
     """
     日期转换为自1951-01-01 00:00:00的时间, 无法解析时返回None
     """
@@ -110,15 +108,15 @@ def date_to_sec(input_date: str) -> u.Quantity | None:
         return
 
     if seconds_since_ksp_epoch is not None:
-        return seconds_since_ksp_epoch * u.s
+        return seconds_since_ksp_epoch
 
 
-def sec_to_date(seconds: u.Quantity) -> datetime:
+def sec_to_date(seconds: float) -> datetime:
     """
     自1951-01-01 00:00:00的时间转换为datetime对象
     """
     epoch = datetime(1951, 1, 1, 0, 0, 0)
-    time_difference = timedelta(seconds=seconds.to_value(u.s))
+    time_difference = timedelta(seconds=seconds)
     result_datetime = epoch + time_difference
     return result_datetime
 
@@ -146,43 +144,6 @@ def dummy_roll_out():
     """用于将游戏场景切换回"""
     sc = UTIL_CONN.space_center
     sc.launch_vessel('VAB', 'dummy', 'LaunchPad', True, [])
-
-### VESSEL.NAME ###
-
-def vessel_namer(name: str,
-                 neg: list[str] = None) -> str:
-    if _DEBUG_MODE:
-        return name
-    if neg is None:
-        neg = []
-    sc = UTIL_CONN.space_center
-    vessels = sc.vessels
-    max_count = 0  # 最高#尾编号
-    for v in vessels:
-        if v.name in neg:
-            continue
-        if v.type == sc.VesselType.debris:
-            continue
-        name_words = v.name.split('#')
-        if name == ''.join(name_words[:-1]) or name == v.name:  # 是否重名
-            try:  # 更新最大尾编号
-                num = int(name_words[-1])
-            except ValueError:
-                num = 0
-            if num > max_count:
-                max_count = num + 1
-    if not max_count:
-        return name
-    return f'{name}#{max_count}'
-
-
-def get_original_name(name) -> str:
-    words = name.split('#')
-    try:
-        int(words[-1])
-        return '#'.join(words[:-1])
-    except ValueError:
-        return name
 
 ### VESSEL ###
 
@@ -217,7 +178,7 @@ def get_vessel_by_name(name):
     for v in vessels:
         if v.name == name:
             return v
-    return None
+    raise ValueError(name)
 
 
 def get_parts_in_stage_by_type(vessel: Vessel, target: str, stage: int) -> list[Part]:
