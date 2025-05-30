@@ -5,6 +5,7 @@ import numpy as np
 import krpc
 
 from .tasks import Task
+from ..astro.frame import BCIFrame
 from ..utils import *
 
 if TYPE_CHECKING:
@@ -17,6 +18,7 @@ __all__ = [
     'Soyuz2Launch',
     'Ariane5ECALaunch',
     'LongMarch7Launch',
+    'LongMarch10Launch',
     'LAUNCH_ROCKET_DIC',
     'LAUNCH_PAYLOAD_DIC',
 ]
@@ -27,23 +29,29 @@ class Launch(Task):
 
     def __init__(self,
                  spacecraft: Spacecraft,
-                 orbit: Orbit,
                  tasks: Tasks,
-                 start_time: float = -1,
-                 duration: float = 1800,
-                 importance: int = 3,
+                 orbit: Orbit,
                  payload: str = "Relay",
                  crew_name_list: None | list[str] = None,
                  direction: str = 'SE',
+                 start_time: float = -1,
+                 duration: float = 1800,
+                 importance: int = 3,
                  submit_next: bool = True):
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.orbit = orbit
         self.direction = direction
-        if self.start_time < 0:
-            # 如果不严格按照传入的start_time发射, 就寻找最近的发射窗口发射到轨道面上
-            launch_window = self.orbit.launch_window(self.spacecraft.name, direction=self.direction, cloest=True)
-            # TODO
-            self.start_time = launch_window - 600
+        self.start_time = max(UTIL_CONN.space_center.ut, start_time)
+        site = LAUNCH_SITES_COORDS['wenchang']
+        launch_window = self.orbit.launch_window(
+            site_coord  = site, 
+            direction   = self.direction, 
+            cloest      = True,
+            start_time  = self.start_time
+        )
+        # TODO
+        self.start_time = launch_window - 360
+
         self.payload = payload
         if crew_name_list is None:
             self.crew_name_list = []
@@ -84,12 +92,9 @@ class Launch(Task):
             self.pe_altitude = 400000
         # TODO
         latitude = np.deg2rad(LAUNCH_SITES_COORDS['wenchang'][0])
-        if latitude > self.inclination:
+        if abs(self.inclination) < abs(latitude):
             self.inc_desired = self.inclination
-            self.inclination = latitude
-        elif latitude > np.pi - self.inclination:
-            self.inc_desired = self.inclination
-            self.inclination = -latitude
+            self.inclination = abs(latitude) * self.inclination / abs(self.inclination)
 
         self.autopilot.desired_orbit_altitude = self.pe_altitude
         self.autopilot.desired_inclination = np.rad2deg(self.inclination)
@@ -122,7 +127,6 @@ class Launch(Task):
             sleep(10)
         if self.submit_next:
             self._submit_next_task()
-        self.conn.close()
 
     def _submit_next_task(self):
         from .maneuver import SimpleMnv
@@ -184,7 +188,7 @@ class Ariane5ECALaunch(Launch):
         from .maneuver import SimpleMnv
         from .release_payload import ReleasePayload
         new_task = []
-        p_release_1 = ReleasePayload(self.spacecraft, self.tasks, count=2)
+        p_release_1 = ReleasePayload(self.spacecraft, self.tasks)
         p_release_2 = ReleasePayload(self.spacecraft, self.tasks)
 
         new_task.append(p_release_1)
@@ -200,16 +204,36 @@ class Ariane5ECALaunch(Launch):
 
 class LongMarch7Launch(Launch):
     payload_type = ['Relay']
-    rocket_name = 'LongMarch_7'
+    rocket_name = 'CZ_7'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
+class LongMarch10Launch(Launch):
+    payload_type = ['Lanyue']
+    rocket_name = 'CZ_10'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _submit_next_task(self):
+        from .maneuver import SimpleMnv
+        new_task = []
+        if self.pe_desired is not None:
+            pe_mnv = SimpleMnv(self.spacecraft, self.tasks, 'pe', self.pe_desired)
+            new_task.append(pe_mnv)
+        if self.inc_desired is not None:
+            inc_mnv = SimpleMnv(self.spacecraft, self.tasks, 'inc', self.inc_desired)
+            new_task.append(inc_mnv)
+        if new_task:
+            self.tasks.submit_nowait(new_task)
+
 LAUNCH_ROCKET_DIC: dict[str, Type[Launch]] = {
     'soyuz2':       Soyuz2Launch,
     'ariane5':      Ariane5ECALaunch,
     'cz7':          LongMarch7Launch,
+    'cz10':         LongMarch10Launch,
 }
 
 LAUNCH_PAYLOAD_DIC = {

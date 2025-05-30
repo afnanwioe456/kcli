@@ -72,7 +72,6 @@ class Docking(Task):
         LOGGER.debug(f'{self.spacecraft.name} -> {self.spacestation.name} docking')
         _dock_with_target(self.conn, self.spacestation, target_dpext)
         LOGGER.debug(f'{self.spacecraft.name} -> {self.spacestation.name} docking completed')
-        self.conn.close()
     
     def _to_dict(self):
         dic = {
@@ -123,4 +122,3 @@ class Undocking(Task):
         sleep(5)
         v.control.forward = 0
         v.control.rcs = False
-        self.conn.close()

@@ -3,6 +3,7 @@ import numpy.linalg as npl
 
 from ..astro.orbit import Orbit
 from ..astro.frame import BCIFrame
+from ..astro.constants import G0
 from ..spacecrafts import Spacecraft
 from ..math import (
     scalar as ms, 
@@ -11,23 +12,22 @@ from ..math import (
 from ..utils import *
 
 
-g0 = 9.80665
 D9 = 1 / 9
 D24 = 1 / 24
 
-sim_params = {
-    'dry_mass':             ...,
-    'mass':                 ...,
-    'min_throttle_cmp':     ...,  # 引擎支持的节流阀开度
-    'max_throttle_cmp':     ...,
-    'sim_throttle':         ...,  # 节流阀前馈
-    'landing_asl':          ...,  # 着陆场海拔
-    'vac_thrust':           ...,
-    'vac_isp':              ...,
-    'asl_thrust':           ...,
-    'asl_isp':              ...,
-    'suicide_check':        ...,  # 计算决断高度
-}
+# sim_params = {
+#     'dry_mass':             ...,
+#     'mass':                 ...,
+#     'min_throttle_cmp':     ...,  # 引擎支持的节流阀开度
+#     'max_throttle_cmp':     ...,
+#     'sim_throttle':         ...,  # 节流阀前馈
+#     'landing_asl':          ...,  # 着陆场海拔
+#     'vac_thrust':           ...,
+#     'vac_isp':              ...,
+#     'asl_thrust':           ...,
+#     'asl_isp':              ...,
+#     'suicide_check':        ...,  # 计算决断高度
+# }
 
 
 class ReentrySimulation:
@@ -247,7 +247,7 @@ class ReentrySimulation:
                 #     self._trajectory.record(t, self._suicide_check_x, self._suicide_check_v)
                 break
 
-            self._mass -= self._thrust * dt / (isp * g0)
+            self._mass -= self._thrust * dt / (isp * G0)
             self._mass = max(self._dry_mass, self._mass)  # TODO: 燃料不足
             t += dt
             self._suicide_check_x += dx

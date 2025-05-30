@@ -93,7 +93,7 @@ class Orbit(OrbitBase):
             return self.is_safe()
         if 2 * np.pi - orb.nu < self.nu:
             # 如果epoch处更接近近星点
-            return orb.is_safe()
+            return orb.is_safe(orb.nu)
         return self.is_safe(self.nu)
         
     @staticmethod
@@ -188,7 +188,7 @@ class Orbit(OrbitBase):
         )
 
     def launch_window(self, 
-                      site_p: np.ndarray, 
+                      site_coord: float[tuple, tuple],
                       direction: str = 'SE', 
                       cloest: bool = False, 
                       search: bool = True,
@@ -214,12 +214,13 @@ class Orbit(OrbitBase):
         if min_phase is None:
             min_phase = np.deg2rad(10)
         if max_phase is None:
-            min_phase = np.deg2rad(30)
-        if start_time is None or end_time is None:
+            max_phase = np.deg2rad(30)
+        if start_time is None:
             start_time = self.epoch
-            end_time = self.epoch + self.attractor.rotational_period * 10
+        if end_time is None:
+            end_time = start_time + self.attractor.rotational_period * 10
         ut = orbit_launch_window(
-            self, site_p, direction, cloest, search,
+            self, site_coord, direction, cloest, search,
             min_phase, max_phase, start_time, end_time
         )
         return ut

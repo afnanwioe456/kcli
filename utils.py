@@ -85,7 +85,7 @@ def time_wrap(start_time):
     ut = UTIL_CONN.space_center.ut
     if ut < start_time:
         LOGGER.debug(f'time wrapping to {sec_to_date(start_time)} ...')
-        UTIL_CONN.space_center.warp_to(start_time, max_rails_rate=1e8)
+        UTIL_CONN.space_center.warp_to(start_time)
 
 
 def date_to_sec(input_date: str) -> float | None:
@@ -121,24 +121,6 @@ def sec_to_date(seconds: float) -> datetime:
     return result_datetime
 
 ### LAUNCH_SITE ###
-
-def get_site_position(name: str = 'wenchang'):
-    """发射场或载具的位置矢量"""
-    pos = LAUNCH_SITES_COORDS.get(name, None)
-    if pos is None:
-        v = get_vessel_by_name(name)
-        if v is not None:  
-            # 如果传入的载具已经在任务中, 则将它作为发射位置
-            site_p = v.position(v.orbit.body.non_rotating_reference_frame)
-            site_p = (site_p[0], site_p[2], site_p[1])
-            return site_p
-        else:
-            pos = LAUNCH_SITES_COORDS.get('wenchang')
-    la, lo = pos
-    body = UTIL_CONN.space_center.bodies['Earth']
-    site_p = body.surface_position(la, lo, body.non_rotating_reference_frame)
-    site_p = (site_p[0], site_p[2], site_p[1])
-    return site_p
 
 def dummy_roll_out():
     """用于将游戏场景切换回"""

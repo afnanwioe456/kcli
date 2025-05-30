@@ -47,7 +47,6 @@ class Rendezvous(Task):
         nodes = mnv.to_krpcv(self.vessel)
         if self.submit_next:
             self._submit_next_task(nodes)
-        self.conn.close()
         
     def _submit_next_task(self, nodes):
         next_task: list[Task] = []

@@ -1,7 +1,8 @@
 import numpy as np
 
 from .constants import KSP_BODY_CONSTANTS
-from .utils import UTIL_CONN
+from .utils import *
+from ..math import rotation as mr
 
 
 class Body:
@@ -63,3 +64,14 @@ class Body:
     def orbit(self, epoch):
         from .orbit import Orbit
         return Orbit.from_krpcorb(self.krpc_body.orbit).propagate_to_epoch(epoch)
+
+    def surface_position(self, coord, epoch):
+        from .frame import BCIFrame
+        body    = self.krpc_body
+        ref     = body.non_rotating_reference_frame
+        ut      = get_ut()
+        pos     = body.surface_position(*coord, ref)
+        pos     = BCIFrame.transform_d_from_left_hand(pos)
+        theta   = (epoch - ut) / self.rotational_period * 2 * np.pi
+        pos     = mr.vec_rotation(pos, self.angular_velocity, theta)
+        return pos

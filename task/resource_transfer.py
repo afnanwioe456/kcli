@@ -77,7 +77,6 @@ class ResourceTransfer(Task):
                     in_parts.append(ext.part)
             _transfer_resource(out_parts, in_parts, r, a, rt)            
         sleep(10)
-        self.conn.close()
 
     def _to_dict(self):
         dic = {

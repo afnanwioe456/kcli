@@ -9,6 +9,7 @@ from ..utils import *
 
 if TYPE_CHECKING:
     from .tasks import Tasks
+    from ..astro.body import Body
     from ..spacecrafts import Spacecraft
     from krpc.services.spacecenter import Vessel, Node
 
@@ -78,7 +79,6 @@ class SimpleMnv(Task):
         nodes = mnv.to_krpcv(self.vessel)
         if self.submit_next:
             self._submit_next_task(nodes)
-        self.conn.close()
 
     def _submit_next_task(self, nodes):
         task_list = []
@@ -117,7 +117,7 @@ class CaptureMnv(Task):
     def __init__(self, 
                  spacecraft: Spacecraft, 
                  tasks: Tasks, 
-                 orb_t: Orbit,
+                 body: Body,
                  ap_t: float,
                  start_time: float = -1, 
                  duration: float = 300, 
@@ -125,13 +125,13 @@ class CaptureMnv(Task):
                  submit_next: bool = True):
         """捕获机动"""
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
-        self.orb_t = orb_t
+        self.body = body
         self.ap_t = ap_t
 
     @property
     def description(self):
         return (f'{self.spacecraft.name} 捕获机动规划\n'
-                f'\t{self.orb_t.attractor.name}: {self.ap_t}\n'
+                f'\t{self.body.name}: {self.ap_t}\n'
                 f'\t预计执行时: {sec_to_date(self.start_time)}')
 
     @logging_around
@@ -139,11 +139,10 @@ class CaptureMnv(Task):
         if not self._conn_setup():
             return
         krpc_orb = self.spacecraft.vessel.orbit
-        while krpc_orb.body.name != self.orb_t.attractor.name:
+        while krpc_orb.body.name != self.body.name:
             krpc_orb = krpc_orb.next_orbit
             if krpc_orb is None:
-                self.conn.close()
-                raise RuntimeError(f"{self.spacecraft.name} not in a fly-by orbit of {self.orb_t.attractor.name}")
+                raise RuntimeError(f"{self.spacecraft.name} not in a fly-by orbit of {self.body.name}")
         orb = Orbit.from_krpcorb(krpc_orb)
         mnv = SimpleMnv(
             self.spacecraft, 
@@ -155,23 +154,22 @@ class CaptureMnv(Task):
             submit_next = self.submit_next,
         )
         self.tasks.submit_nowait(mnv)
-        self.conn.close()
 
     def _to_dict(self):
         dic =  {
-            'orb_t':    self.orb_t._to_dict(),
-            'ap_t':     self.ap_t
+            'body_name':    self.body.name,
+            'ap_t':         self.ap_t
         }
         return super()._to_dict() | dic
     
     @classmethod
     def _from_dict(cls, data, tasks):
         from ..spacecrafts import Spacecraft
-        from ..astro.orbit import Orbit
+        from ..astro.body import Body
         return cls(
             spacecraft  = Spacecraft.get(data['spacecraft_name']),
             tasks       = tasks,
-            orb_t       = Orbit._from_dict(data['orb_t']),
+            body        = Body.get_or_create(data['body_name']),
             ap_t        = data['ap_t'],
             start_time  = data['start_time'],
             duration    = data['duration'],
@@ -191,7 +189,7 @@ class ExecuteNode(Task):
                  tol: float = 0.2, 
                  submit_next: bool = True):
         """执行最近的一个节点"""
-        duration = max(2 * burn_time, duration)
+        duration = max(2 * burn_time, duration, 60)
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.burn_time = burn_time
         self.tol = tol
@@ -205,19 +203,21 @@ class ExecuteNode(Task):
     def start(self):
         if not self._conn_setup():
             return
-        if self.burn_time > 3:
+        time_wrap(self.start_time - self.duration)
+        if self.burn_time > 1:
             self.spacecraft.part_exts.main_engines = True
         else:
             self.spacecraft.part_exts.main_engines = False
         self.spacecraft.part_exts.rcs = True
+        self.vessel.control.rcs = True
         self.executor = self.mj.node_executor
         self.executor.autowarp = True
         self.executor.tolerance = self.tol
         self.executor.execute_one_node()
         while not self.tasks.abort_flag and self.executor.enabled:
             sleep(5)
-        self.spacecraft.part_exts.rcs = False
-        self.conn.close()
+        self.spacecraft.part_exts.main_engines = True
+        self.vessel.control.rcs = False
 
     @classmethod
     def from_node(cls, 
@@ -229,7 +229,7 @@ class ExecuteNode(Task):
                   submit_next: bool = True):
         """执行节点"""
         v = spacecraft.vessel
-        # FIXME: 引擎状态不一致
+        # FIXME: 引擎状态不一致, 质量不一致
         burn_time = compute_burn_time(
             node.delta_v, 
             spacecraft.part_exts.main_engines, 

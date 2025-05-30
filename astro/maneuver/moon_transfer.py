@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
-from scipy.optimize import dual_annealing, root_scalar, minimize, NonlinearConstraint
+from scipy.optimize import dual_annealing, root_scalar, minimize
 from numba import njit
 
 from ..core.kepler import *
 from ..core.lagrange import *
 from ..orbit import Orbit
-from ..frame import OrbitalFrame, PQWFrame
+from ..frame import OrbitalFrame
 
 if TYPE_CHECKING:
     from ..body import *
@@ -137,20 +137,13 @@ if TYPE_CHECKING:
 #     orb_trans_start = Orbit.from_rv(moon.attractor, r_vec, v_vec, trans_t)
 #     return orb_trans_start
 
-###
-# 寻找向卫星目标倾角轨道转移的最优瞄准轨道
-# 确定捕获时刻后, 问题转化为minarg(e) -> f(e, raan, argp) = pe
-# 即寻找匹配pe的最小e, 仅适用于pe较小值
-# 在轨道参考系下的计算
-# e-行星 m-卫星
-###
-
 @njit
 def _flyby_rv(rp_m, e, inc, raan, argp, soi, GMm):
     """根据捕获轨道参数转换为捕获时状态向量"""
     v_esc2 = (e - 1) * GMm / rp_m
     h = rp_m * np.sqrt(v_esc2 + 2 * GMm / rp_m)
-    nu = np.arccos((h ** 2 / (GMm * soi) - 1) / e)
+    arg = (h ** 2 / (GMm * soi) - 1) / e
+    nu = np.arccos(min(max(arg, -1), 1))
     nu = 2 * np.pi - nu
     rcap_vec, vcap_vec = coe2rv(h, e, inc, raan, argp, nu, GMm)
     return rcap_vec, vcap_vec
@@ -164,6 +157,131 @@ def _transfer_rp(raan, argp, e, rp_m, inc, rm_vec, vm_vec, soi, GMm, GMe):
     he, ee = rv2he(re_vec, ve_vec, GMe)
     rp_e = nu2r(0, he, ee, GMe)
     return rp_e
+
+###
+# 寻找向卫星目标轨道转移的最优瞄准轨道
+# 问题为minarg(e) -> f(delta_nu, e, argp) = pe
+# delta_nu为卫星轨道经过的nu
+# 在卫星中心惯性参考系下进行计算
+###
+
+@njit
+def _transfer_rp_x(e, delta_t, argp, rp_m, raan, inc, rm_vec, vm_vec, soi, GMm, GMe):
+    rm_vec, vm_vec = rv2rv_delta_t(rm_vec, vm_vec, delta_t, GMe)
+    return _transfer_rp(raan, argp, e, rp_m, inc, rm_vec, vm_vec, soi, GMm, GMe)
+
+def _find_e_orbit_root(rp_e, period, *args):
+    def rp_at_e(e):
+        def objective(vars):
+            dt, argp    = vars
+            pi_2        = 2 * np.pi
+            M           = dt // pi_2  # 缩放至同一尺度
+            dt          = dt % pi_2 / pi_2 * (period / 2)
+            argp        = (argp + M * np.pi) % pi_2
+            res         = _transfer_rp_x(e, dt, argp, *args)
+            return res
+
+        # FIXME: 边缘跳变导致的局部最小值
+        res = minimize(objective, jac='2-point', method='BFGS',
+                       x0=[np.pi, 5], options={'xrtol': 1e-5})
+        print(f'e: {e}, success? {res.success}')
+        return res.fun, *res.x
+
+    def rp_diff_at_e(e):
+        return rp_at_e(e)[0] - rp_e
+
+    # FIXME: 无解处理
+    res = root_scalar(rp_diff_at_e, method='brentq', bracket=[1.001, 1.5])
+    e               = res.root
+    rp, dt, argp    = rp_at_e(e)
+    pi_2            = 2 * np.pi
+    M               = dt // pi_2
+    dt              = dt % pi_2 / pi_2 * (period / 2)
+    argp            = (argp + M * np.pi) % pi_2
+    print(res)
+    print(f'diff: {rp - rp_e}, dt: {dt}, argp: {argp}')
+    return e, dt, argp
+
+def transfer_orbit_target(orb_v: Orbit, 
+                          orb_t: Orbit, 
+                          cap_t: float, 
+                          rp_t: float | None = None,
+                          timed=False):
+    """向卫星目标轨道转移的瞄准轨道, 位于捕获临界前
+
+    Args:
+        orb_v (Orbit): 航天器轨道
+        orb_t (Orbit): 目标轨道
+        cap_t (Quantity): 瞄准捕获时间
+        rp_t (Quantity): 飞越近星点
+        timed (bool): 严格按瞄准时间捕获
+
+    Returns:
+        Orbit: 瞄准轨道
+    """
+    moon    = orb_t.attractor
+    if moon.attractor is not orb_v.attractor:
+        raise ValueError(f'Transfer must be inside the same planet system, '
+                         f'got {moon.attractor.name} and {orb_v.attractor.name}.')
+    orb_m   = moon.orbit(cap_t)
+    period  = orb_m.period
+    rm_vec  = orb_m.r_vec
+    vm_vec  = orb_m.v_vec
+    rp_e    = orb_v.ra
+    rp_m    = rp_t if rp_t else orb_t.ra
+    GM_e    = moon.attractor.mu
+    GM_m    = moon.mu
+    soi     = moon.soi
+    raan    = orb_t.raan
+    inc     = orb_t.inc
+
+    args    = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
+    e, delta_t, argp    = _find_e_orbit_root(rp_e, *args)
+    rcap_vec, vcap_vec  = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
+    orb_m   = orb_m.propagate(delta_t)
+    re_vec  = orb_m.r_vec + rcap_vec
+    ve_vec  = orb_m.v_vec + vcap_vec
+    orb_t   = Orbit.from_rv(moon.attractor, re_vec, ve_vec, orb_m.epoch)
+    return orb_t
+
+def return_target(orb_v: Orbit, pe_e: float, esc_t: float):
+    """从卫星返回行星指定近星点高度的瞄准轨道, 位于逃逸临界前
+
+    Args:
+        orb_v (Orbit): 航天器轨道
+        pe_e (float): 近星点高度
+        esc_t (float): 瞄准逃逸时间
+
+    Returns:
+        Orbit: 瞄准轨道
+    """
+    moon    = orb_v.attractor
+    earth   = moon.attractor
+    orb_m   = moon.orbit(esc_t)
+    period  = orb_m.period
+    rm_vec  = orb_m.r_vec
+    vm_vec  = orb_m.v_vec
+    rp_e    = (pe_e + earth.r)
+    rp_m    = orb_v.ra
+    GM_e    = earth.mu
+    GM_m    = moon.mu
+    soi     = moon.soi
+    raan    = orb_v.raan
+    inc     = orb_v.inc
+    inc     = np.pi - inc  # 逆向求解
+    args    = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
+    e, delta_t, argp    = _find_e_orbit_root(rp_e, *args)
+    resc_vec, vesc_vec  = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
+    orb_t   = Orbit.from_rv(moon, resc_vec, -vesc_vec, orb_v.epoch + delta_t)
+    return orb_t
+
+###
+# 寻找向卫星目标倾角轨道转移的最优瞄准轨道
+# 确定捕获时刻后, 问题转化为minarg(e) -> f(e, raan, argp) = pe
+# 即寻找匹配pe的最小e, 仅适用于pe较小值
+# 在轨道参考系下的计算
+# e-行星 m-卫星
+###
 
 @njit
 def _call_transfer_rp_raan_argp(paras, *args):
@@ -245,145 +363,4 @@ def transfer_target(orbit: Orbit, moon: Body, cap_t, pe_m, inc, relative=True):
         re_vec = ref.transform_d_to_parent(re_vec)
         ve_vec = ref.transform_d_to_parent(ve_vec)
     orb_t = Orbit.from_rv(moon.attractor, re_vec, ve_vec, cap_t)
-    return orb_t
-
-###
-# 寻找向卫星目标轨道转移的最优瞄准轨道
-# 问题为minarg(e) -> f(delta_nu, e, argp) = pe
-# delta_nu为卫星轨道经过的nu
-# 在卫星中心惯性参考系下进行计算
-###
-
-# @njit
-# def _call_transfer_rp_argp(paras, e, rp_m, raan, inc, rm_vec, vm_vec, soi, GMm, GMe):
-#     delta_t, argp = paras[0], paras[1]
-#     rm_vec, vm_vec = rv2rv_delta_t(rm_vec, vm_vec, delta_t, GMe)
-#     return _transfer_rp(raan, argp, e, rp_m, inc, rm_vec, vm_vec, soi, GMm, GMe)
-
-# def _min_rp_at_e_orbit(e, period, *args):
-#     args = (e, *args)
-#     bounds = [(0, period / 2), (0, 2 * np.pi)]
-#     result = dual_annealing(_call_transfer_rp_argp, bounds, args, 250)
-#     return result.fun, result.x
-
-# def _rp_diff_at_e_orbit(e, rp_e, *args):
-#     return _min_rp_at_e_orbit(e, *args)[0] - rp_e
-
-# def _find_e_annealing(rp_e, *args):
-#     solution = root_scalar(_rp_diff_at_e_orbit, args=(rp_e, *args), method='brentq', bracket=[1, 1.5])
-#     e = solution.root
-#     delta_t, argp = _min_rp_at_e_orbit(e, *args)[1]
-#     return e, delta_t, argp
-
-@njit
-def _transfer_rp_x(e, delta_t, argp, rp_m, raan, inc, rm_vec, vm_vec, soi, GMm, GMe):
-    rm_vec, vm_vec = rv2rv_delta_t(rm_vec, vm_vec, delta_t, GMe)
-    return _transfer_rp(raan, argp, e, rp_m, inc, rm_vec, vm_vec, soi, GMm, GMe)
-
-def _find_e_orbit_root(rp_e, period, *args):
-    eps = 1e-6
-
-    def rp_at_e(e):
-        def grad(f, x):
-            g = np.zeros_like(x)
-            for i in range(len(x)):
-                x1, x2 = x.copy(), x.copy()
-                x1[i] += eps
-                x2[i] -= eps
-                g[i] = (f(x1) - f(x2)) / (2*eps)
-            return g
-
-        def objective(vars):
-            dt, argp = vars
-            dt = dt % (period / 2)
-            argp = argp % (2 * np.pi)
-            return _transfer_rp_x(e, dt, argp, *args)
-
-        res = minimize(objective, x0=[period / 4, 0], jac=lambda x: grad(objective, x), method='BFGS')
-        return res.fun, *res.x
-
-    def rp_diff_at_e(e):
-        return rp_at_e(e)[0] - rp_e
-
-    # FIXME: 无解处理
-    res = root_scalar(rp_diff_at_e, method='brentq', bracket=[1.001, 1.5], x0=1.2, maxiter=50)
-    e = res.root
-    rp, dt, argp = rp_at_e(e)
-    dt = dt % (period / 2)
-    argp = argp % (2 * np.pi)
-    print(res)
-    print(f'diff: {rp - rp_e}, dt: {dt}, argp: {argp}')
-    return e, dt, argp
-
-def transfer_orbit_target(orb_v: Orbit, 
-                          orb_t: Orbit, 
-                          cap_t: float, 
-                          rp_t: float | None = None,
-                          timed=False):
-    """向卫星目标轨道转移的瞄准轨道, 位于捕获临界前
-
-    Args:
-        orb_v (Orbit): 航天器轨道
-        orb_t (Orbit): 目标轨道
-        cap_t (Quantity): 瞄准捕获时间
-        rp_t (Quantity): 飞越近星点
-        timed (bool): 严格按瞄准时间捕获
-
-    Returns:
-        Orbit: 瞄准轨道
-    """
-    moon    = orb_t.attractor
-    if moon.attractor is not orb_v.attractor:
-        raise ValueError(f'Transfer must be inside the same planet system, '
-                         f'got {moon.attractor.name} and {orb_v.attractor.name}.')
-    orb_m   = moon.orbit(cap_t)
-    period  = orb_m.period
-    rm_vec  = orb_m.r_vec
-    vm_vec  = orb_m.v_vec
-    rp_e    = orb_v.ra
-    rp_m    = rp_t if rp_t else orb_t.ra
-    GM_e    = moon.attractor.mu
-    GM_m    = moon.mu
-    soi     = moon.soi
-    raan    = orb_t.raan
-    inc     = orb_t.inc
-
-    args    = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
-    e, delta_t, argp    = _find_e_orbit_root(rp_e, *args)
-    rcap_vec, vcap_vec  = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
-    orb_m   = orb_m.propagate(delta_t)
-    re_vec  = orb_m.r_vec + rcap_vec
-    ve_vec  = orb_m.v_vec + vcap_vec
-    orb_t   = Orbit.from_rv(moon.attractor, re_vec, ve_vec, orb_m.epoch)
-    return orb_t
-
-def return_target(orb_v: Orbit, pe_e: float, esc_t: float):
-    """从卫星返回行星指定近星点高度的瞄准轨道, 位于逃逸临界前
-
-    Args:
-        orb_v (Orbit): 航天器轨道
-        pe_e (float): 近星点高度
-        esc_t (float): 瞄准逃逸时间
-
-    Returns:
-        Orbit: 瞄准轨道
-    """
-    moon    = orb_v.attractor
-    earth   = moon.attractor
-    orb_m   = moon.orbit(esc_t)
-    period  = orb_m.period
-    rm_vec  = orb_m.r_vec
-    vm_vec  = orb_m.v_vec
-    rp_e    = (pe_e + earth.r)
-    rp_m    = orb_v.ra
-    GM_e    = earth.mu
-    GM_m    = moon.mu
-    soi     = moon.soi
-    raan    = orb_v.raan
-    inc     = orb_v.inc
-    inc     = np.pi - inc  # 逆向求解
-    args    = (period, rp_m, raan, inc, rm_vec, vm_vec, soi, GM_m, GM_e)
-    e, delta_t, argp    = _find_e_orbit_root(rp_e, *args)
-    resc_vec, vesc_vec  = _flyby_rv(rp_m, e, inc, raan, argp, soi, GM_m)
-    orb_t   = Orbit.from_rv(moon, resc_vec, -vesc_vec, orb_v.epoch + delta_t)
     return orb_t

@@ -22,7 +22,7 @@ IMPORTANCE:
 0: 弹幕普通发射任务 
 1: 弹幕高优先级发射任务
 2: 弹幕紧急发射任务
-3: 对接, 资源转移
+3: 对接, 资源转移, 默认着陆规划
 4: 
 5: 默认优先级
 6: 默认交会规划, 转移规划
@@ -65,7 +65,7 @@ class Task:
         self.vessel = self.spacecraft.vessel
         if not switch_to_vessel(self.vessel):
             return False
-        self.conn = krpc.connect(self.spacecraft.name)
+        self.conn = UTIL_CONN
         self.sc = self.conn.space_center
         if self.sc is None:
             return False
@@ -133,6 +133,8 @@ class Tasks:
     def submit_nowait(self, task: Task | list[Task]):
         if not isinstance(task, list):
             task = [task]
+        if not task:
+            return
         self._task_list = task + self._task_list
 
         log = (f"Tasks [{self._id}] added {len(task)} new Task(s):\n"

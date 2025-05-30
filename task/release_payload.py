@@ -18,10 +18,10 @@ class ReleasePayload(Task):
     def __init__(self,
                  spacecraft: Spacecraft,
                  tasks: Tasks,
+                 count: int = 1,
                  start_time: float = -1,
                  duration: float = 60,
                  importance: int = 0,
-                 count: int = 1,
                  submit_next: bool = True):
         super().__init__(spacecraft, tasks, start_time, duration, importance, submit_next)
         self.count = count
@@ -65,7 +65,6 @@ class ReleasePayload(Task):
             self.vessel = self.sc.active_vessel
         else:
             adapter.delete()
-            self.conn.close()
             return
 
         # 如果还有载荷
@@ -85,7 +84,6 @@ class ReleasePayload(Task):
         adapter.delete()
         self.vessel.type = VesselType.debris
         self.vessel.name += ' Debris'
-        self.conn.close()
 
     def _to_dict(self):
         dic = {

@@ -131,10 +131,10 @@ class SpaceStation(SpacecraftSingleton):
     _supply_mission_count = 0
     _last_mission_end_time = 0
 
-    def supply_mission(self, tasks: Tasks):
+    def supply_mission(self, tasks: Tasks) -> list[Task]:
         raise NotImplementedError()
 
-    def crew_mission(self, tasks: Tasks):
+    def crew_mission(self, tasks: Tasks) -> list[Task]:
         raise NotImplementedError()
 
     @logging_around
@@ -192,7 +192,6 @@ class KerbalSpaceStation(SpaceStation):
             counter = self._supply_mission_count
         else:
             raise ValueError(mission_type)
-        site_p = get_site_position()
         orb = Orbit.from_krpcv(self.vessel)
         if self._last_mission_end_time < orb.epoch:
             self._last_mission_end_time = orb.epoch
@@ -201,13 +200,13 @@ class KerbalSpaceStation(SpaceStation):
         self._last_mission_end_time = end_time
         launch_direction = 'SE'
         launch_window = orb.launch_window(
-            site_p, 
+            site_coord  = LAUNCH_SITES_COORDS['wenchang'],  # FIXME
             direction   = launch_direction, 
             min_phase   = self._min_phase_diff, 
             max_phase   = self._max_phase_diff,
             start_time  = start_time,
             end_time    = end_time
-            )
+        )
         spacecraft = Spacecraft(f'{self.name} {mission_type} mission {counter}')
         from .task.launch import Soyuz2Launch
         from .task.rendezvous import Rendezvous
@@ -215,7 +214,7 @@ class KerbalSpaceStation(SpaceStation):
         from .task.resource_transfer import ResourceTransfer
         insert_orbit = Orbit.from_coe(
             orb.attractor,
-            orb.attractor.r + 240000,
+            orb.attractor.r + 220000,
             0.001,
             orb.inc,
             orb.raan,
@@ -232,11 +231,7 @@ class KerbalSpaceStation(SpaceStation):
             direction=launch_direction
         )
         rdv_task = Rendezvous(spacecraft, self, tasks)
-        dock_task = Docking(
-            spacecraft, 
-            self, 
-            tasks
-        )
+        dock_task = Docking(spacecraft, self, tasks)
         task_list = [launch_task, rdv_task, dock_task] 
         if mission_type == 'supply':
             resource_task = ResourceTransfer(
@@ -248,12 +243,11 @@ class KerbalSpaceStation(SpaceStation):
             task_list.append(resource_task)
         return task_list
 
-    def return_mission(self, docking_port: DockingPortExt, tasks: Tasks) -> list[Task]:
+    def return_mission(self, s: Spacecraft, tasks: Tasks) -> list[Task]:
         from .task.maneuver import SimpleMnv
         from .task.docking import Undocking
         from .task.landing import GlideLanding
-        s = docking_port.docked_with
-        undocking_task = Undocking(s, docking_port, tasks)
+        undocking_task = Undocking(s, tasks)
         mnv_plan_task = SimpleMnv(s, tasks, 'pe', self._deorbit_alt, importance=0)
         landing_task = GlideLanding(s, tasks)
         return [undocking_task, mnv_plan_task, landing_task]
@@ -261,7 +255,6 @@ class KerbalSpaceStation(SpaceStation):
 
 class GroundStation(SpacecraftSingleton):
     pass
-    
 
 KSS = KerbalSpaceStation()
 

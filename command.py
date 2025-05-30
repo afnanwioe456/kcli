@@ -2,6 +2,8 @@ from __future__ import annotations
 from docopt import docopt
 import random
 
+from .astro.orbit import Orbit
+from .astro.body import Body
 from .task.launch import *
 from .task.tasks import *
 from .spacecrafts import *
@@ -11,9 +13,10 @@ from .utils import *
 LAUNCH_DOC = f"""
 Usage:
     ! launch [options] [<elements> ...]
-    ! la [options] [<elements> ...]
+    ! l [options] [<elements> ...]
 
-"!launch"指令用于发射新载具,
+"!launch", "!l"指令用于发射新载具.
+
 如: "!launch -o 250 -i 28.61"(将默认火箭发射到倾角28.61°, 250km圆轨),
     "!launch -r soyuz2 -p r"(发射搭载中继卫星的联盟2号运载火箭到默认轨道),
     "!launch -e 7000 0.01 45 80 30 60"(发射到轨道根数确定的目标轨道).
@@ -36,12 +39,13 @@ Options:
                             升交点赤经(deg), 近地点辐角(deg), 真近点角(deg).
 """
 
-SS_DOC = f"""
+STATION_DOC = f"""
 Usage:
-    ! <space-station> -h
-    ! <space-station> (-c | -s)
+    ! <station> [options]
 
-"!<space-station>"指令用于部署空间站任务, 使用"!ss"指令查看可用空间站详情.
+"!<station>"指令用于部署空间站/地面站任务.
+使用"!station"指令查看可用空间站/地面站详情.
+
 如: "!kss -c"(kss空间站乘员任务),
     "!kss --supply"(kss空间站补给任务),
 
@@ -51,18 +55,22 @@ Options:
     -s --supply             部署补给任务.
 """
 
-ROCKET_DOC = f"""
-这是一条临时rocket帮助, 维护中...
-可用运载火箭:
-soyuz2        联盟2号
-ariane5       阿丽亚娜5型
-cz7           长征7号
-如：!launch -r 运载火箭 -o 450
+BODY_DOC = f"""
+Usage:
+    ! <body> [options] [<elements> ...]
+
+"!<body>"指令用于部署行星/卫星着陆任务.
+使用"!bodies"指令查看太阳系与支持的天体.
+使用"!<body> -h"指令(如"!moon -h")查看天体详情与支持的任务.
+如: "!moon -s trq"(着陆到月球静海站)
+    "!moon -m 50 -30"(着陆到月球(50°N, 30°W))
+
+Options:
+    -h --help               查看天体详情.
+    -s --site               着陆场.
+    -m --elements           着陆场的坐标.
 """
 
-PAYLOAD_DOC = f"""
-这是一条临时payload帮助, 当前请忽略-p参数使用默认载荷
-"""
 
 class ChatMsg:
     def __init__(self,
@@ -119,11 +127,11 @@ class Command:
             return
         if command_type == 'queue':
             return
-        if command_type in ['launch', 'la']:
+        if command_type in ['launch', 'l']:
             return self._launch_command_process(command_args)
         if command_type in SPACESTATION_DIC.keys():
             return self._spacestation_command_process(command_args)
-        if command_type == 'ss':
+        if command_type == 'station':
             return
         if command_type == 'n':
             return
@@ -153,22 +161,40 @@ class Command:
             LOGGER.warning(f'@{self.msg.user_id} {rocket}不能搭载{payload}, 使用“!rocket”指令查看运载火箭可用载荷.')
             return
 
-        pe, ap, c = args['--periapsis'], args['--apoapsis'], args['--circular']
-        if ap and pe:
-            ap = float(ap) * 1000.0
-            pe = float(pe) * 1000.0
-        elif ap:
-            ap = float(ap) * 1000.0
-            pe = 200000.0
-        elif c:
-            ap, pe = float(c) * 1000.0, float(c) * 1000.0
+        if args['--elements']:
+            a, e, inc, raan, argp, nu = args['<elements>']
+            a = a * 1000
+            inc = np.deg2rad(inc)
+            raan = np.deg2rad(raan)
+            argp = np.deg2rad(argp)
+            nu = np.deg2rad(nu)
         else:
-            ap, pe = 250000.0, 200000.0
-        # TODO: 轨道根数发射
-        ap, pe = max(ap, pe), min(ap, pe)
-        ap, pe = max(ap, 200000.0), max(pe, 200000.0)
+            pe = args['--periapsis']
+            ap = args['--apoapsis']
+            c = args['--circular']
+            inc = args['--inclination']
+            if ap and pe:
+                ap = float(ap) * 1000
+                pe = float(pe) * 1000
+            elif ap:
+                ap = float(ap) * 1000
+                pe = 200000.
+            elif c:
+                ap, pe = float(c) * 1000., float(c) * 1000.
+            else:
+                ap, pe = 220000., 200000.
+            ap, pe = max(ap, pe), min(ap, pe)
+            ap, pe = max(ap, 200000.0), max(pe, 200000.0)
+            earth = Body.get_or_create('Earth')
+            ra, rp = ap + earth.r, pe + earth.r
+            a = (ra + rp) / 2
+            e = (ra - rp) / (ra + rp)
+            inc = np.deg2rad(inc)
+            raan = random.random() * 2 * np.pi
+            argp = 0
+            nu = 0
+        orbit = Orbit.from_coe(earth, a, e, inc, raan, argp, nu, 0)
 
-        inc = args['--inclination']
         priority = args['--priority']
         start_time = date_to_sec(args['--time']) if args['--time'] else -1
 
@@ -178,19 +204,17 @@ class Command:
 
         self.tasks = Tasks(self.msg)
         self.tasks.submit(executor(
-            tasks=self.tasks, 
             spacecraft=Spacecraft(name), 
+            tasks=self.tasks, 
+            orbit=orbit,
             payload=payload, 
-            ap_altitude=ap, 
-            pe_altitude=pe,
-            inclination=inc, 
             start_time=start_time,
             importance=int(priority)))
         return self.tasks
 
     def _spacestation_command_process(self, command_args) -> Tasks | None:
         try: 
-            args = docopt(SS_DOC, command_args)
+            args = docopt(STATION_DOC, command_args)
         except SystemExit:
             if '-h' in command_args or '--help' in command_args:
                 return
@@ -198,9 +222,9 @@ class Command:
             return
 
         self.tasks = Tasks(self.msg)
-        spacestation = SPACESTATION_DIC.get(args['<space-station>'], None)
+        spacestation = SPACESTATION_DIC.get(args['<station>'], None)
         if not spacestation:
-            LOGGER.warning(f'@{self.msg.user_name} 未知空间站{args["<space-station>"]}, 使用"!ss"指令查看可用空间站.')
+            LOGGER.warning(f'@{self.msg.user_name} 未知空间站{args["<station>"]}, 使用"!ss"指令查看可用空间站.')
             return
 
         if args['--supply']:

@@ -40,7 +40,6 @@ class Transfer(Task):
         nodes = mnv.to_krpcv(self.vessel)
         if self.submit_next:
             self._submit_next_task(nodes)
-        self.conn.close()
 
     def _submit_next_task(self, nodes):
         mnv_tasks = []
@@ -55,7 +54,8 @@ class Transfer(Task):
         correct_task = CourseCorrect(
             self.spacecraft, 
             self.tasks, 
-            self.orb_t, 
+            # FIXME: 提前一段时间机动, 否则在soi转移时会卡住
+            self.orb_t.propagate(-3600),
             start_time = orb_cor.epoch)
         mnv_tasks.append(correct_task)
         self.tasks.submit_nowait(mnv_tasks)
@@ -105,13 +105,13 @@ class CourseCorrect(Task):
         if not self._conn_setup():
             return
         time_wrap(self.start_time)
-        orb_v = Orbit.from_krpcv(self.vessel)
+        # FIXME: 提前一点时间规划机动
+        orb_v = Orbit.from_krpcv(self.vessel).propagate(60)
         mnv = Maneuver.course_correction(orb_v, self.orb_t)
         print(mnv)
         nodes = mnv.to_krpcv(self.vessel)
         if self.submit_next:
             self._submit_next_task(nodes)
-        self.conn.close()
 
     def _submit_next_task(self, nodes):
         mnv_tasks = []

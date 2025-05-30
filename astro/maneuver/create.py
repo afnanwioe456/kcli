@@ -77,13 +77,15 @@ class Maneuver:
             total += np.linalg.norm(i[1])
         return total
 
-    def is_safe(self):
+    def is_safe(self, end_orbit=False):
         orbits = self.apply(intermediate=True)
-        for i in range(len(orbits) - 1):
+        size = len(orbits) - 1
+        for i in range(size):
             orb = orbits[i]
-            safe = orb.is_safe_before(orbits[i + 1].epoch)
-            if not safe:
+            if not orb.is_safe_before(orbits[i + 1].epoch):
                 return False
+        if end_orbit and not orbits[-1].is_safe():
+            return False
         return True
 
     def apply(self, intermediate=False) -> list[Orbit] | Orbit:
@@ -160,7 +162,7 @@ class Maneuver:
                      revisit_epoch: float,
                      immediate = False,
                      conserved = True,
-                     safety_check = True) -> Maneuver:
+                     safety_check = True) -> Maneuver | None:
         """调相机动
 
         Args:
@@ -169,9 +171,6 @@ class Maneuver:
             at_pe (bool, optional): 允许近星点处的转移. Defaults to False.
             conserved (bool, optional): 恢复原轨道. Defaults to True.
             safety_check (bool, optional): 安全检测. Defaults to True.
-
-        Raises:
-            ValueError: 无解, 尝试兰伯特机动
 
         Returns:
             Maneuver: 调相机动
@@ -209,14 +208,15 @@ class Maneuver:
         min_dv = np.inf
         best_mnv = None
         for m in mnvs:
-            if safety_check and not m.is_safe():
+            # FIXME: 是否要对最终轨道进行安全检测?
+            if safety_check and not m.is_safe(end_orbit=True):
                 continue
             dv = m.get_total_cost()
             if dv < min_dv:
                 min_dv = dv
                 best_mnv = m
         if best_mnv is None:
-            raise ValueError('No possible solution')
+            return None
         return best_mnv
     
     @staticmethod
@@ -355,11 +355,12 @@ class Maneuver:
         orb_transfer    = orb_t.propagate_to_nu(0, M=-1)
         mnv_coplanar    = Maneuver.match_plane(orb_v, orb_transfer, closest=True, conserved=True)
         orb_coplanar    = mnv_coplanar.apply()
-        delta_nu        = mv.angle_between_vectors(orb_coplanar.v_vec, orb_transfer.v_vec, orb_coplanar.h_vec)
+        delta_nu        = mv.angle_between_vectors(orb_coplanar.r_vec, orb_transfer.r_vec, orb_coplanar.h_vec)
         orb_coplanar    = orb_coplanar.propagate_to_nu(orb_coplanar.nu + delta_nu)
-        mnv_phase       = Maneuver.change_phase(orb_coplanar, orb_transfer.epoch, conserved=False)
+        print(f'revisit dt: {orb_transfer.epoch - orb_coplanar.epoch}')
+        mnv_phase       = Maneuver.change_phase(orb_coplanar, orb_transfer.epoch, immediate=True, conserved=False)
         orb_start       = mnv_phase.apply()
         orb_start       = orb_start.propagate_to_epoch(orb_transfer.epoch)
-        mnv_transfer    = Maneuver.lambert(orb_start, orb_t.propagate(-60))
+        mnv_transfer    = Maneuver.lambert(orb_start, orb_t)
         mnv_series      = Maneuver.serial(orb_v, [mnv_coplanar, mnv_phase, mnv_transfer])
         return mnv_series
