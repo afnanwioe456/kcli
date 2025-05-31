@@ -8,6 +8,7 @@ from .moon_transfer import *
 from .planner import *
 from ..orbit import Orbit
 from ..frame import OrbitalFrame, BCIFrame
+from ...math import scalar as ms
 
 if TYPE_CHECKING:
     from ..body import *
@@ -218,6 +219,24 @@ class Maneuver:
         if best_mnv is None:
             return None
         return best_mnv
+
+    @staticmethod
+    def staged_burn(orb: Orbit, revisit_epoch: float, max_ra: float):
+        """分阶段点火. 将轨道远地点抬升至不超过最大值的某处, 在指定时刻重访.
+
+        Args:
+            orb (Orbit): 初始轨道.
+            revisit_epoch (float): 重访时刻.
+            max_ra (float): 限制最大远地点半径不超过此值.
+
+        Returns:
+            Maneuver: 分阶段点火机动
+        """
+        max_period = a2T((orb.r + max_ra) / 2, orb.attractor.mu)
+        dt = revisit_epoch - orb.epoch
+        M = (dt // max_period) + 1
+        imp = change_phase_planner(orb, dt, False, conserved=False, M=M)
+        return Maneuver(imp, orb)
     
     @staticmethod
     def lambert(orb_v: Orbit, orb_t: Orbit, solver=bond, **kwargs):
@@ -299,7 +318,7 @@ class Maneuver:
                                    orb_v: Orbit, 
                                    orb_t: Orbit, 
                                    cap_t: float,
-                                   rp_t: float | None = None
+                                   rp: float | None = None
                                    ):
         """向卫星目标轨道转移的瞄准轨道, 位于捕获临界前
 
@@ -313,7 +332,7 @@ class Maneuver:
             Orbit: 瞄准轨道
         """
         # 瞄准捕获时间当前只是开始搜索时间, 因此如果瞄准时间大于最近的窗口, 可能会错过较近的窗口
-        orb_target = transfer_orbit_target(orb_v, orb_t, cap_t, rp_t=rp_t)
+        orb_target = transfer_orbit_target(orb_v, orb_t, cap_t, rp_t=rp)
         orb_transfer = orb_target.propagate_to_nu(0, M=-1)
         if orb_transfer.epoch < orb_v.epoch:
             cap_t += orb_t.attractor.rotational_period / 2
@@ -322,7 +341,7 @@ class Maneuver:
         return orb_target
 
     @classmethod
-    def moon_return_target(cls, orb_v: Orbit, pe: float, esc_t: float):
+    def moon_return_target(cls, orb_v: Orbit, rp: float, esc_t: float):
         """从卫星返回行星指定近星点高度的瞄准轨道, 位于逃逸临界前
 
         Args:
@@ -333,12 +352,12 @@ class Maneuver:
         Returns:
             Orbit: 瞄准轨道
         """
-        orb_target = return_target(orb_v, pe, esc_t)
+        orb_target = return_target(orb_v, rp, esc_t)
         orb_transfer = orb_target.propagate_to_nu(0, M=-1)
         if orb_transfer.epoch < orb_v.epoch:
             esc_t += orb_v.attractor.rotational_period / 2
             warnings.warn(f'orbit already passed transfer window, trying capture time {esc_t}', RuntimeWarning)
-            return cls.moon_return_target(orb_v, pe, esc_t)
+            return cls.moon_return_target(orb_v, rp, esc_t)
 
     @classmethod
     def transfer(cls, orb_v: Orbit, orb_t: Orbit):
@@ -357,8 +376,12 @@ class Maneuver:
         orb_coplanar    = mnv_coplanar.apply()
         delta_nu        = mv.angle_between_vectors(orb_coplanar.r_vec, orb_transfer.r_vec, orb_coplanar.h_vec)
         orb_coplanar    = orb_coplanar.propagate_to_nu(orb_coplanar.nu + delta_nu)
-        print(f'revisit dt: {orb_transfer.epoch - orb_coplanar.epoch}')
-        mnv_phase       = Maneuver.change_phase(orb_coplanar, orb_transfer.epoch, immediate=True, conserved=False)
+        # mnv_phase       = Maneuver.change_phase(orb_coplanar, orb_transfer.epoch, immediate=True, conserved=False)
+        # FIXME: 计算一个合适的速度增量对应的ra, 考虑封装这个逻辑
+        _max_v          = ms.lerp(orb_v.v, orb_transfer.v, 0.5)
+        _a              = 1 / (2 / orb_v.r - _max_v ** 2 / orb_v.attractor.mu)
+        max_ra          = 2 * _a - orb_v.r
+        mnv_phase       = Maneuver.staged_burn(orb_coplanar, orb_transfer.epoch, max_ra)
         orb_start       = mnv_phase.apply()
         orb_start       = orb_start.propagate_to_epoch(orb_transfer.epoch)
         mnv_transfer    = Maneuver.lambert(orb_start, orb_t)

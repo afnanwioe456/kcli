@@ -122,7 +122,7 @@ class OrbitBase:
     def period(self) -> float:
         if self.e >= 1:
             return np.inf
-        return T(self.a, self.attractor.mu)
+        return a2T(self.a, self.attractor.mu)
 
     @cached_property
     def delta_t(self):

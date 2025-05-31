@@ -244,7 +244,7 @@ def transfer_orbit_target(orb_v: Orbit,
     orb_t   = Orbit.from_rv(moon.attractor, re_vec, ve_vec, orb_m.epoch)
     return orb_t
 
-def return_target(orb_v: Orbit, pe_e: float, esc_t: float):
+def return_target(orb_v: Orbit, rp_e: float, esc_t: float):
     """从卫星返回行星指定近星点高度的瞄准轨道, 位于逃逸临界前
 
     Args:
@@ -261,7 +261,6 @@ def return_target(orb_v: Orbit, pe_e: float, esc_t: float):
     period  = orb_m.period
     rm_vec  = orb_m.r_vec
     vm_vec  = orb_m.v_vec
-    rp_e    = (pe_e + earth.r)
     rp_m    = orb_v.ra
     GM_e    = earth.mu
     GM_m    = moon.mu

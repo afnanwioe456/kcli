@@ -194,7 +194,7 @@ class LandingMnv(Task):
             # 提前t_waiting到达近地点
             epoch_revisit   = orbit.epoch + t_window - t_waiting
             orbit_pe        = orbit.propagate_to_nu(0)
-            phase_mnv       = Maneuver.change_phase(orbit_pe, epoch_revisit)
+            phase_mnv       = Maneuver.change_phase(orbit_pe, epoch_revisit, conserved=False)
             dv_phase        = phase_mnv.get_total_cost()
             # 如果调相时间过短, 则直接进行倾角机动
             # 如果调相机动比倾角机动更低效, 则直接进行倾角机动

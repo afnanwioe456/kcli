@@ -113,15 +113,16 @@ def lambert_planner(orb_v: Orbit, orb_t: Orbit, solver=bond, **kwargs):
     imps = [(0, imp1), (dt, imp2)]
     return imps
 
-def change_phase_planner(orb: Orbit, dt, inner, conserved=True):
+def change_phase_planner(orb: Orbit, dt, inner, conserved=True, M=None):
     period = orb.period
-    M = dt // period
+    M = dt // period if M is None else M
     if not inner and M == 0:
         return
     if inner:
         inter_period = dt / (M + 1)
     else:
         inter_period = dt / M
+    # FIXME: 原速度方向/叉积方向?
     v0 = orb.v
     v1 = T2v(inter_period, orb.r, orb.attractor.mu)
     imp = (v1 - v0) * mv.normalize(orb.v_vec)

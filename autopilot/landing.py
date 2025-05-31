@@ -71,17 +71,12 @@ def landing(spacecraft: Spacecraft, landing_coord: tuple):
     t_0, x_0, _ = traj.view[0]
     t_final, x_final, _ = traj.view[-1]
     t_suicide, x_suicide, v_suicide = traj.suicide_state
-    # 将着陆点强制修改为预测落点, 用于测试
-    # landing_site_de = x_final
-    # landing_asl = npl.norm(landing_site_de) - body_r
     x_e             = landing_site_de - x_final
     # FIXME: 如果发现初始误差较大应该修正点火位置, 当前只是粗略估计
-    # 估计修正速度
-    v_correct       = npl.norm(x_e) / (t_final - t_suicide)
     # 估计修正可用加速度
-    a_correct       = vac_thrust / mass * (max_throttle_ctrl - sim_throttle)
-    t_correct       = v_correct / a_correct
-    t_suicide       -= t_correct
+    a_correct       = vac_thrust / mass * (max_throttle_cmp - min_throttle_cmp) / 2
+    t_correct       = t_final - np.sqrt(2 * a_correct * npl.norm(x_e))
+    t_suicide       = min(t_suicide, t_correct)
     x_suicide, _    = traj.sample(t_suicide)
     suicide_alt     = npl.norm(x_suicide) - body_r
 
@@ -94,7 +89,7 @@ def landing(spacecraft: Spacecraft, landing_coord: tuple):
     print(f'landing time: {t_final - t_0} angle: {np.rad2deg(mv.angle_between_vectors(x_final, x_0))}')
     print(f'error: {npl.norm(x_e)}')
     print(f'error_ver: {npl.norm(x_e_ver)} error_par: {npl.norm(x_e_par)} error_nor: {npl.norm(x_e_nor)}')
-    print(f'correct dt: {t_correct} corrected suicide alt: {suicide_alt}')
+    print(f'corrected dt: {t_suicide - t_0} corrected suicide alt: {suicide_alt}')
 
     if debug_line:
         print('plotting...')
@@ -125,6 +120,7 @@ def landing(spacecraft: Spacecraft, landing_coord: tuple):
 
     # 动力减速
     print('Decelerating')
+    final_height += 10
     control.throttle = 0.001
     base_thrust_factor = ms.lerp(min_throttle_cmp, max_throttle_cmp, sim_throttle)
 
@@ -204,7 +200,7 @@ def landing(spacecraft: Spacecraft, landing_coord: tuple):
 
         if dt < 1e-6:
             continue
-        if alt < 0.5:
+        if alt < 1:
             ap.target_direction = x_i
             control.throttle = 0
             break
@@ -217,17 +213,16 @@ def landing(spacecraft: Spacecraft, landing_coord: tuple):
         v_norm      = max(v_norm, v_touchdown)
         v_t         = -v_norm * x_i
 
-        if alt > final_height * 0.5:
-            # 如果大于最终高度, 进行落点修正
-            x_e         = landing_site - x
-            x_e_ver     = np.dot(x_e, x_i) * x_i
-            x_e_hor     = x_e - x_e_ver
-            dx_e        = (x_e_hor - x_e_prev) / dt
-            v_t         += 0.5 * x_e_hor + 0.1 * dx_e
-            x_e_prev    = x_e_hor
+        # 进行水平落点修正
+        x_e         = landing_site - x
+        x_e_ver     = np.dot(x_e, x_i) * x_i
+        x_e_hor     = x_e - x_e_ver
+        dx_e        = (x_e_hor - x_e_prev) / dt
+        v_t         += 0.6 * x_e_hor + 0.1 * dx_e
+        x_e_prev    = x_e_hor
 
         v_t         *= min(npl.norm(v_t) / 20 + 0.1, 1)  # 快速衰减
-        v_t         = mv.conic_clamp(v_t, v, 0, v_norm, max_tilt, prograde=True)
+        v_t         = mv.conic_clamp(v_t, v, v_touchdown, v_norm, max_tilt, prograde=True)
         v_e         = v_t - v
         dv_e        = (v_e - v_e_prev) / dt
         v_e_prev    = v_e
@@ -236,7 +231,7 @@ def landing(spacecraft: Spacecraft, landing_coord: tuple):
         print(f'alt: {alt:.2f} vt: {npl.norm(v_t):.2f} '
               f'v: {npl.norm(v_t - v):.2f} error: {npl.norm(landing_site - x):.2f}')
 
-        a           = v_e * 0.5 + dv_e * 0.1
+        a           = v_e * 0.6 + dv_e * 0.1
         T_e         = m * a
         T_0         = m * mid_acc * x_i
         T           = T_0 + T_e

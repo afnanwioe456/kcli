@@ -31,7 +31,7 @@ def v2r(v, a, GM):
     return 2 * GM / (v ** 2 + GM / a)
 
 @njit
-def T(a, GM):
+def a2T(a, GM):
     """椭圆轨道的周期"""
     return 2 * np.pi * a ** 1.5 / GM ** 0.5
 
